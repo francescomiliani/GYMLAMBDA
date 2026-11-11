@@ -3,8 +3,8 @@
 Client Python e Lambda per consultare corsi e impegni sul portale Sportrick
 (`replywellnessTO`), prenotare e cancellare lezioni e inviare notifiche email e Telegram.
 
-**Stato:** le nuove azioni e Telegram sono disponibili nel codice locale; la Lambda già
-pubblicata continua a eseguire la versione precedente con notifiche email SNS.
+**Stato:** le nuove azioni sono distribuite sulla Lambda; le variabili per email SNS e
+Telegram sono configurate. La pianificazione rimane disattivata.
 
 La pianificazione è **disattivata** dall'11/11/2026. Quando abilitata gira lunedì,
 mercoledì e venerdì alle 07:00 (ora di Roma) e prenota la lezione delle 07:00 **7 giorni
@@ -19,7 +19,7 @@ dopo**; la funzione si può anche invocare a mano con data e orario.
 | Ruolo Lambda | `GymBooking-personale-lambda-role` (log + `sns:Publish`) |
 | Schedule | `gym-booking-mwf-0700` — `DISABLED`, `cron(0 7 ? * MON,WED,FRI *)`, `Europe/Rome`, finestra `OFF` |
 | Topic notifiche | `arn:aws:sns:eu-north-1:163876584948:GymBooking-notifiche` |
-| Variabili d'ambiente | `SPORTRICK_USERNAME`, `SPORTRICK_PASSWORD`, `SNS_TOPIC_ARN` |
+| Variabili d'ambiente | `SPORTRICK_USERNAME`, `SPORTRICK_PASSWORD`, `SNS_TOPIC_ARN`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` |
 | Prenotazioni verificate l'11/11/2026 | mar 17 e mer 18 novembre 2026, 07:00 |
 
 Le nuove azioni esplicite consentono anche di consultare attività, calendari e impegni,
@@ -27,7 +27,7 @@ e gestire prenotazioni di lezioni e liste d'attesa. Non richiedono una schedule.
 
 ## Come funziona
 
-Il flusso precedente nel codice locale usa un'unica sessione, poi invia una notifica:
+Il flusso precedente usa un'unica sessione, poi invia una notifica:
 
 1. **Login** — lettura del modulo e `POST /Account/Login` con credenziali e token del modulo.
 2. **Calendario** — `POST /Booking/GetActivitySchedule` con `currentDate` e `activityID`;
@@ -88,9 +88,7 @@ automaticamente; l'esempio locale seguente lo usa per impostare le variabili d'a
 
 ## Invocazione
 
-### Azioni esplicite nel codice locale
-
-Queste azioni non sono ancora disponibili nella Lambda pubblicata.
+### Azioni esplicite
 
 Gli identificativi sono **stringhe**, anche quando contengono solo cifre: possono essere
 troppo lunghi per un numero JavaScript. Prima elenca i corsi e consulta il calendario;
@@ -351,7 +349,7 @@ nell'iscrizione SNS, quindi non finisce nel repo.
 | Oggetto | `GymBooking: prenotazione confermata` |
 | Corpo | `2026-11-18 07:00 - SALA ATTREZZI - prenotazione confermata` |
 
-La versione locale invia un avviso sia per le prenotazioni sia per le cancellazioni
+La funzione invia un avviso sia per le prenotazioni sia per le cancellazioni
 confermate. Se sono configurati `TELEGRAM_BOT_TOKEN` e `TELEGRAM_CHAT_ID`, invia lo stesso
 messaggio anche al bot Telegram. I due canali sono indipendenti; l'esito della prenotazione
 resta valido anche se una notifica fallisce. Il campo `notifications` riporta `accepted`
@@ -371,8 +369,8 @@ export TELEGRAM_BOT_TOKEN="$(cat ~/.config/gymbooking/telegram-token)"
 export TELEGRAM_CHAT_ID="$(cat ~/.config/gymbooking/telegram-chat-id)"
 ```
 
-Queste modifiche sono locali: la Lambda già pubblicata non riceve automaticamente il nuovo
-codice o le variabili Telegram.
+La Lambda è stata aggiornata l'11/11/2026; le modifiche successive al codice locale vanno
+distribuite con la procedura di deploy.
 
 Cambiare destinatario:
 
@@ -392,6 +390,8 @@ Verificato l'11/11/2026 su una prenotazione reale (mercoledì 18 novembre, 07:00
 La versione locale è stata provata l'11/11/2026 su **Functional Training, lunedì 16
 novembre alle 18:30**: prenotazione e cancellazione confermate, entrambe le notifiche
 ricevute sia via email sia via Telegram. L'impegno di prova è stato rimosso.
+La Lambda aggiornata è stata verificata in sola lettura con catalogo, calendario e impegni;
+non sono state effettuate nuove prenotazioni dalla Lambda dopo il deploy.
 
 ## Annullare una prenotazione
 
