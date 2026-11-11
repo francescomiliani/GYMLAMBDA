@@ -1,0 +1,7 @@
+lambda_function/credentials.json
+.aws-sam/
+__pycache__/
+*.py[cod]
+.venv/
+.env
+.env.*

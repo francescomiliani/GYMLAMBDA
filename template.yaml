@@ -1,0 +1,32 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  GymBooking
+
+  Sample SAM Template for GymBooking
+
+Parameters:
+  SportrickUsername:
+    Type: String
+    NoEcho: true
+    MinLength: 1
+  SportrickPassword:
+    Type: String
+    NoEcho: true
+    MinLength: 1
+
+Resources:
+  LambdaFunction:
+    Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
+    Properties:
+      MemorySize: 128
+      Timeout: 60
+      CodeUri: lambda_function/
+      Handler: app.lambda_handler
+      Runtime: python3.12
+      Environment:
+        Variables:
+          SPORTRICK_USERNAME: !Ref SportrickUsername
+          SPORTRICK_PASSWORD: !Ref SportrickPassword
+      Architectures:
+        - x86_64
