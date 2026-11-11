@@ -167,6 +167,10 @@ aws sns subscribe --topic-arn arn:aws:sns:eu-north-1:163876584948:GymBooking-not
 L'iscrizione resta `PendingConfirmation` finché il destinatario non apre la mail di AWS e
 clicca il link: fino ad allora le notifiche non vengono consegnate.
 
+Verificato l'11/11/2026 su una prenotazione reale (mercoledì 18 novembre, 07:00): log
+`Prenotazione confermata con successo.`, nessun `notifica non inviata`, e
+`AWS/SNS NumberOfNotificationsDelivered = 1` sul minuto dell'invocazione.
+
 ## Deploy
 
 La funzione gira in `eu-north-1`, Python 3.12, 128 MB, timeout 60 s, ruolo
