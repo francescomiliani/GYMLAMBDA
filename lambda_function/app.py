@@ -33,13 +33,29 @@ def lambda_handler(event, context):
     try:
         if event.get('inspect'):
             return inspect(body_login, research_date)
-        return book(body_login, research_date, times)
+        return notify(book(body_login, research_date, times))
     except (requests.RequestException, ValueError, KeyError, TypeError, IndexError):
         raise RuntimeError('Sportrick request or response failed') from None
 
 
 def local_now():
     return datetime.datetime.now(LOCAL_TZ)
+
+
+# La notifica non deve mai far fallire una prenotazione già confermata.
+def notify(result):
+    topic = os.environ.get('SNS_TOPIC_ARN')
+    if topic:
+        try:
+            import boto3  # import locale: la notifica è opzionale, il resto no
+            boto3.client('sns').publish(
+                TopicArn=topic,
+                Subject='GymBooking: prenotazione confermata',
+                Message=f"{result['date']} {result['time']} - {result['message']}",
+            )
+        except Exception as error:
+            print(f'notifica non inviata: {error}')
+    return result
 
 
 def login(session, body_login):
