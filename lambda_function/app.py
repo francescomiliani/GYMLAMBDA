@@ -63,8 +63,12 @@ def schedule(session, research_date):
 def inspect(body_login, research_date):
     with requests.Session() as session:
         login(session, body_login)
-        slots = [(d.get('TimeStart'), d.get('AppointmentId')) for d in schedule(session, research_date) or []]
+        entries = schedule(session, research_date) or []
+        slots = [(d.get('TimeStart'), d.get('AppointmentId')) for d in entries]
         print(f'{research_date} slots: {slots}')
+        # Campi completi: due slot dello stesso giorno possono avere flag diversi.
+        print(f'slot detail: {[d for d in entries if d.get("TimeStart") in ("07:00", "08:00")]}')
+        print(f'bookable: {[(d.get("TimeStart"), d.get("Notes")) for d in entries]}')
         page = session.get(booking_page_url, timeout=15)
         page.raise_for_status()
         actions = re.findall(r'<form[^>]*action="([^"]*)"', page.text, re.I)
@@ -78,8 +82,13 @@ def inspect(body_login, research_date):
 def book(body_login, research_date, start_time):
     with requests.Session() as session:
         login(session, body_login)
-        daily_activities = schedule(session, research_date)
-        appointmentID = [d['AppointmentId'] for d in daily_activities if d['TimeStart'] == start_time][0]
+        daily_activities = schedule(session, research_date) or []
+        entry = [d for d in daily_activities if d['TimeStart'] == start_time][0]
+        # Una lezione al completo compare comunque in elenco: l'unico segnale
+        # affidabile è Notes == 'Prenota', altrimenti il POST viene rifiutato.
+        if entry.get('Notes') != 'Prenota':
+            raise RuntimeError(f'{research_date} {start_time} non prenotabile: {entry.get("Notes")}')
+        appointmentID = entry['AppointmentId']
 
         body_booking = {'appointmentID': appointmentID}
         response_booking = session.post(booking_url, headers=headers_booking, data=body_booking, timeout=15)

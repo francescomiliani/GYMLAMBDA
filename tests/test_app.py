@@ -10,7 +10,7 @@ from lambda_function import app
 class BookingTests(unittest.TestCase):
     def test_login_and_booking(self):
         login, activity, booking = (MagicMock() for _ in range(3))
-        activity.json.return_value = {'data': [{'TimeStart': '18:15', 'AppointmentId': '123'}]}
+        activity.json.return_value = {'data': [{'TimeStart': '18:15', 'AppointmentId': '123', 'Notes': 'Prenota'}]}
         booking.json.return_value = {'message': 'Prenotazione confermata con successo.'}
         session = MagicMock()
         session.post.side_effect = [login, activity, booking]
@@ -61,7 +61,7 @@ class BookingTests(unittest.TestCase):
 
     def test_missing_time_never_calls_booking(self):
         login, activity = MagicMock(), MagicMock()
-        activity.json.return_value = {'data': [{'TimeStart': '18:15', 'AppointmentId': '123'}]}
+        activity.json.return_value = {'data': [{'TimeStart': '18:15', 'AppointmentId': '123', 'Notes': 'Prenota'}]}
         session = MagicMock()
         session.post.side_effect = [login, activity]
         with patch.dict(os.environ, {'SPORTRICK_USERNAME': 'secret-user', 'SPORTRICK_PASSWORD': 'secret-pass'}), \
@@ -75,7 +75,7 @@ class BookingTests(unittest.TestCase):
 
     def test_rejected_booking_reports_portal_message(self):
         login, activity, booking = (MagicMock() for _ in range(3))
-        activity.json.return_value = {'data': [{'TimeStart': '07:00', 'AppointmentId': '123'}]}
+        activity.json.return_value = {'data': [{'TimeStart': '07:00', 'AppointmentId': '123', 'Notes': 'Prenota'}]}
         booking.json.return_value = {'message': 'Lezione al completo.'}
         session = MagicMock()
         session.post.side_effect = [login, activity, booking]
@@ -89,13 +89,29 @@ class BookingTests(unittest.TestCase):
         self.assertEqual(str(error.exception), 'Booking was not confirmed: Lezione al completo.')
         self.assertNotIn('secret', output.getvalue())
 
+    def test_full_lesson_is_not_booked(self):
+        login, activity = MagicMock(), MagicMock()
+        activity.json.return_value = {'data': [{
+            'TimeStart': '08:00', 'AppointmentId': '123',
+            'Notes': "Lezione al completo. Vuoi metterti in lista d'attesa?",
+        }]}
+        session = MagicMock()
+        session.post.side_effect = [login, activity]
+        with patch.dict(os.environ, {'SPORTRICK_USERNAME': 'secret-user', 'SPORTRICK_PASSWORD': 'secret-pass'}), \
+             patch.object(app.requests, 'Session') as factory, contextlib.redirect_stdout(io.StringIO()):
+            factory.return_value.__enter__.return_value = session
+            with self.assertRaises(RuntimeError) as error:
+                app.lambda_handler({'date': '2026-11-18', 'time': '08:00'}, None)
+        self.assertIn('non prenotabile', str(error.exception))
+        self.assertEqual(session.post.call_count, 2)  # mai BookAppointment
+
     def test_local_timezone_is_rome(self):
         self.assertEqual(app.local_now().tzinfo.key, 'Europe/Rome')
         self.assertEqual(app.LOCAL_TZ.key, 'Europe/Rome')
 
     def test_defaults_to_seven_days_ahead_at_1815(self):
         login, activity, booking = (MagicMock() for _ in range(3))
-        activity.json.return_value = {'data': [{'TimeStart': '18:15', 'AppointmentId': '123'}]}
+        activity.json.return_value = {'data': [{'TimeStart': '18:15', 'AppointmentId': '123', 'Notes': 'Prenota'}]}
         booking.json.return_value = {'message': 'Prenotazione confermata con successo.'}
         session = MagicMock()
         session.post.side_effect = [login, activity, booking]
