@@ -45,5 +45,20 @@ class BookingTests(unittest.TestCase):
         factory.assert_not_called()
 
 
+    def test_inspect_lists_slots_without_booking(self):
+        login, activity, page = (MagicMock() for _ in range(3))
+        activity.json.return_value = {'data': [{'TimeStart': '07:00', 'AppointmentId': '123'}]}
+        page.text = '<form action="/Booking/BookAppointment"></form>'
+        session = MagicMock()
+        session.post.side_effect = [login, activity]
+        session.get.return_value = page
+        with patch.dict(os.environ, {'SPORTRICK_USERNAME': 'secret-user', 'SPORTRICK_PASSWORD': 'secret-pass'}), \
+             patch.object(app.requests, 'Session') as factory, contextlib.redirect_stdout(io.StringIO()):
+            factory.return_value.__enter__.return_value = session
+            result = app.lambda_handler({'inspect': True, 'date': '2026-11-17'}, None)
+        self.assertEqual(result['slots'], [('07:00', '123')])
+        self.assertEqual(session.post.call_count, 2)  # login + calendario, nessuna prenotazione
+
+
 if __name__ == '__main__':
     unittest.main()
