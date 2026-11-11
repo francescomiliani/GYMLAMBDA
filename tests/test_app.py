@@ -89,13 +89,17 @@ class BookingTests(unittest.TestCase):
         self.assertEqual(str(error.exception), 'Booking was not confirmed: Lezione al completo.')
         self.assertNotIn('secret', output.getvalue())
 
+    def test_local_timezone_is_rome(self):
+        self.assertEqual(app.local_now().tzinfo.key, 'Europe/Rome')
+        self.assertEqual(app.LOCAL_TZ.key, 'Europe/Rome')
+
     def test_defaults_to_seven_days_ahead_at_1815(self):
         login, activity, booking = (MagicMock() for _ in range(3))
         activity.json.return_value = {'data': [{'TimeStart': '18:15', 'AppointmentId': '123'}]}
         booking.json.return_value = {'message': 'Prenotazione confermata con successo.'}
         session = MagicMock()
         session.post.side_effect = [login, activity, booking]
-        expected = (app.datetime.datetime.now() + app.datetime.timedelta(days=7)).strftime('%Y-%m-%d')
+        expected = (app.local_now() + app.datetime.timedelta(days=7)).strftime('%Y-%m-%d')
         with patch.dict(os.environ, {'SPORTRICK_USERNAME': 'secret-user', 'SPORTRICK_PASSWORD': 'secret-pass'}), \
              patch.object(app.requests, 'Session') as factory, contextlib.redirect_stdout(io.StringIO()):
             factory.return_value.__enter__.return_value = session
