@@ -532,7 +532,8 @@ o la schedule esistente: non usarlo come sostituto completo della configurazione
 
 ## Test
 
-I 41 test unitari usano mock: nessuna chiamata di rete, nessuna prenotazione, nessuna email.
+I test unitari e di integrazione usano risposte simulate: nessuna chiamata di rete,
+nessuna prenotazione, nessuna email.
 Le indicazioni per gli agenti che lavorano sul repository sono in [AGENTS.md](AGENTS.md).
 
 ```bash
@@ -550,6 +551,9 @@ Coprono:
 - fallback spento di default: nessun ripiego senza `fallback_times`;
 - prenotazione e cancellazione confermate → notifiche con corso, data e ora;
 - errore SNS non impedisce l'invio Telegram e non modifica l'esito della prenotazione;
+- handler e client insieme: prenotazione, cancellazione, lista d'attesa e notifiche;
+- rifiuti, sessione scaduta, risposte inattese e timeout dopo una richiesta di modifica;
+- import dell'handler con i moduli alla radice dello ZIP Lambda;
 - notifica che fallisce: la prenotazione resta valida;
 - nessun `SNS_TOPIC_ARN`: nessuna email SNS; Telegram resta indipendente;
 - rifiuto del portale: messaggio riportato senza dati sensibili;
