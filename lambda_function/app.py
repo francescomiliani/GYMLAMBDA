@@ -2,6 +2,11 @@ import requests
 import datetime
 import os
 import re
+from zoneinfo import ZoneInfo
+
+# Il runtime Lambda vive in UTC: la data va calcolata nel fuso della palestra,
+# altrimenti tra mezzanotte e le 02:00 italiane si prenota il giorno sbagliato.
+LOCAL_TZ = ZoneInfo('Europe/Rome')
 
 login_url = 'https://ecomm.sportrick.com/replywellnessTO/Account/Login?returnUrl=%2FreplywellnessTO'
 booking_url = 'https://ecomm.sportrick.com/replywellnessTO/Booking/BookAppointment'
@@ -22,13 +27,17 @@ def lambda_handler(event, context):
     if not username or not password:
         raise RuntimeError('Sportrick credentials are not configured')
     body_login = {'UserName': username, 'Password': password}
-    research_date = event.get('date') or (datetime.datetime.now() + datetime.timedelta(days=7)).strftime('%Y-%m-%d')
+    research_date = event.get('date') or (local_now() + datetime.timedelta(days=7)).strftime('%Y-%m-%d')
     try:
         if event.get('inspect'):
             return inspect(body_login, research_date)
         book(body_login, research_date, event.get('time', '18:15'))
     except (requests.RequestException, ValueError, KeyError, TypeError, IndexError):
         raise RuntimeError('Sportrick request or response failed') from None
+
+
+def local_now():
+    return datetime.datetime.now(LOCAL_TZ)
 
 
 def login(session, body_login):
@@ -63,7 +72,7 @@ def inspect(body_login, research_date):
         print(f'form actions: {actions}')
         names = [re.search(r'name="([^"]*)"', h) for h in hidden]
         print(f'hidden input names: {[m.group(1) for m in names if m]}')
-        return {'date': research_date, 'slots': slots}
+        return {'date': research_date, 'slots': slots, 'local_now': str(local_now())}
 
 
 def book(body_login, research_date, start_time):

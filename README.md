@@ -67,6 +67,42 @@ aws lambda invoke \
   --log-type Tail --output json /tmp/out.json
 ```
 
+## Orari, fuso orario e cambio dell'ora
+
+Tre cose che si sbagliano facilmente:
+
+1. **Il runtime Lambda vive in UTC.** `datetime.now()` senza fuso, tra mezzanotte e le
+   02:00 italiane, calcola la data del giorno prima. Il codice usa `ZoneInfo('Europe/Rome')`
+   (`local_now()`), verificato nel runtime: restituisce `+01:00` in inverno, `+02:00` in estate.
+
+2. **Gli EventBridge Rules classici sono solo UTC.** Un `cron(1 0 ? * MON-FRI *)` scatta alle
+   01:01 italiane d'inverno e alle 02:01 d'estate: l'ora locale cambia da sola due volte
+   l'anno. Per una pianificazione in ora locale servirebbe **EventBridge Scheduler**, che
+   accetta `ScheduleExpressionTimezone: Europe/Rome` e gestisce il DST: in primavera salta
+   l'ora inesistente, in autunno esegue una volta sola invece di due.
+
+3. **La finestra flessibile sposta solo in avanti.** Con `FlexibleTimeWindow.Mode: OFF` la
+   pianificazione è all'ora esatta, salvo il ritardo di consegna fisiologico. Con `FLEXIBLE`
+   AWS può consegnare l'evento più tardi, entro la finestra configurata (1–1440 minuti).
+   Non esiste una deriva "in anticipo".
+
+**Attenzione alla ridondanza.** Avere più schedule attorno alla mezzanotte è una difesa
+ragionevole contro i ritardi, ma questa funzione **prenota a ogni invocazione**: tre
+schedule significano tre tentativi la stessa notte. Se serve ridondanza, prima va resa
+idempotente (es. controllo della prenotazione esistente prima del POST).
+
+Esempio di pianificazione in ora locale, da creare solo dopo aver risolto l'idempotenza:
+
+```bash
+aws scheduler create-schedule \
+  --name gym-booking-tuesday \
+  --schedule-expression "cron(0 0 ? * TUE *)" \
+  --schedule-expression-timezone "Europe/Rome" \
+  --flexible-time-window '{"Mode": "OFF"}' \
+  --target '{"Arn": "arn:aws:lambda:eu-north-1:ACCOUNT:function:GymBooking-personale", "RoleArn": "ROLE_ARN", "Input": "{\"time\":\"07:00\"}"}' \
+  --region eu-north-1
+```
+
 ## Deploy
 
 La funzione gira in `eu-north-1`, Python 3.12, 128 MB, timeout 60 s, ruolo
@@ -105,7 +141,7 @@ Coprono:
 - orario non presente nel calendario: errore, nessun tentativo di prenotazione;
 - rifiuto del portale: messaggio riportato senza dati sensibili;
 - modalità `inspect`: elenca gli slot e non chiama mai `BookAppointment`;
-- data e ora predefinite a +7 giorni e 18:15.
+- data e ora predefinite a +7 giorni e 18:15, calcolate in `Europe/Rome`.
 
 ## Costi
 
