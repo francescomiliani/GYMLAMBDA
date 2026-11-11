@@ -70,8 +70,39 @@ class BookingTests(unittest.TestCase):
             factory.return_value.__enter__.return_value = session
             with self.assertRaises(RuntimeError) as error:
                 app.lambda_handler({'date': '2026-11-17', 'time': '07:00'}, None)
-        self.assertNotIn('07:00', str(error.exception))
+        self.assertIn('orario non in calendario', str(error.exception))
         self.assertEqual(session.post.call_count, 2)  # mai BookAppointment
+
+    def test_fallback_books_next_available_slot(self):
+        login, activity, booking = (MagicMock() for _ in range(3))
+        activity.json.return_value = {'data': [
+            {'TimeStart': '07:00', 'AppointmentId': 'full', 'Notes': 'Lezione al completo.'},
+            {'TimeStart': '13:30', 'AppointmentId': 'free', 'Notes': 'Prenota'},
+        ]}
+        booking.json.return_value = {'message': 'Prenotazione confermata con successo.'}
+        session = MagicMock()
+        session.post.side_effect = [login, activity, booking]
+        with patch.dict(os.environ, {'SPORTRICK_USERNAME': 'secret-user', 'SPORTRICK_PASSWORD': 'secret-pass'}), \
+             patch.object(app.requests, 'Session') as factory, contextlib.redirect_stdout(io.StringIO()):
+            factory.return_value.__enter__.return_value = session
+            result = app.lambda_handler({'date': '2026-11-16', 'time': '07:00', 'fallback_times': ['13:30']}, None)
+        self.assertEqual(result['time'], '13:30')
+        self.assertEqual(session.post.call_args_list[2].kwargs['data'], {'appointmentID': 'free'})
+
+    def test_fallback_is_disabled_by_default(self):
+        login, activity = MagicMock(), MagicMock()
+        activity.json.return_value = {'data': [
+            {'TimeStart': '07:00', 'AppointmentId': 'full', 'Notes': 'Lezione al completo.'},
+            {'TimeStart': '13:30', 'AppointmentId': 'free', 'Notes': 'Prenota'},
+        ]}
+        session = MagicMock()
+        session.post.side_effect = [login, activity]
+        with patch.dict(os.environ, {'SPORTRICK_USERNAME': 'secret-user', 'SPORTRICK_PASSWORD': 'secret-pass'}), \
+             patch.object(app.requests, 'Session') as factory, contextlib.redirect_stdout(io.StringIO()):
+            factory.return_value.__enter__.return_value = session
+            with self.assertRaises(RuntimeError):
+                app.lambda_handler({'date': '2026-11-16', 'time': '07:00'}, None)
+        self.assertEqual(session.post.call_count, 2)  # nessun ripiego, nessun BookAppointment
 
     def test_rejected_booking_reports_portal_message(self):
         login, activity, booking = (MagicMock() for _ in range(3))

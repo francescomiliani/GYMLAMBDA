@@ -28,10 +28,12 @@ def lambda_handler(event, context):
         raise RuntimeError('Sportrick credentials are not configured')
     body_login = {'UserName': username, 'Password': password}
     research_date = event.get('date') or (local_now() + datetime.timedelta(days=7)).strftime('%Y-%m-%d')
+    # Fallback spento di default: si attiva solo passando fallback_times nel payload.
+    times = [event.get('time', '18:15'), *(event.get('fallback_times') or [])]
     try:
         if event.get('inspect'):
             return inspect(body_login, research_date)
-        book(body_login, research_date, event.get('time', '18:15'))
+        return book(body_login, research_date, times)
     except (requests.RequestException, ValueError, KeyError, TypeError, IndexError):
         raise RuntimeError('Sportrick request or response failed') from None
 
@@ -79,15 +81,22 @@ def inspect(body_login, research_date):
         return {'date': research_date, 'slots': slots, 'local_now': str(local_now())}
 
 
-def book(body_login, research_date, start_time):
+def book(body_login, research_date, times):
     with requests.Session() as session:
         login(session, body_login)
         daily_activities = schedule(session, research_date) or []
-        entry = [d for d in daily_activities if d['TimeStart'] == start_time][0]
         # Una lezione al completo compare comunque in elenco: l'unico segnale
         # affidabile è Notes == 'Prenota', altrimenti il POST viene rifiutato.
-        if entry.get('Notes') != 'Prenota':
-            raise RuntimeError(f'{research_date} {start_time} non prenotabile: {entry.get("Notes")}')
+        # Il fallback prova solo gli slot prenotabili, senza mai mandare un POST a vuoto.
+        rejected = []
+        for start_time in times:
+            entry = ([d for d in daily_activities if d['TimeStart'] == start_time] or [None])[0]
+            note = entry.get('Notes') if entry else 'orario non in calendario'
+            if note == 'Prenota':
+                break
+            rejected.append(f'{start_time} ({note})')
+        else:
+            raise RuntimeError(f'{research_date} non prenotabile: {", ".join(rejected)}')
         appointmentID = entry['AppointmentId']
 
         body_booking = {'appointmentID': appointmentID}
