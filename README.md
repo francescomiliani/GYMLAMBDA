@@ -36,8 +36,10 @@ La funzione legge due variabili d'ambiente:
 |---|---|
 | `SPORTRICK_USERNAME` | username del portale |
 | `SPORTRICK_PASSWORD` | password del portale |
+| `SNS_TOPIC_ARN` | topic SNS per la mail di conferma (opzionale) |
 
-Senza entrambe la funzione si ferma prima di qualsiasi chiamata di rete.
+Senza le prime due la funzione si ferma prima di qualsiasi chiamata di rete. Se
+`SNS_TOPIC_ARN` manca, la prenotazione funziona e nessuna mail viene inviata.
 
 Il file `lambda_function/credentials.json` è solo un residuo locale del primo prototipo:
 è escluso da Git e **non** viene letto dal codice.
@@ -136,6 +138,35 @@ Nessun retry: un errore potrebbe essere arrivato dopo una prenotazione riuscita,
 secondo tentativo cieco sarebbe rischioso. La latenza di consegna resta fisiologica (nel test
 reale: 43 secondi di ritardo su una schedule fissata al secondo).
 
+## Notifica email
+
+Quando una prenotazione viene confermata la funzione pubblica un messaggio sul topic SNS
+`GymBooking-notifiche`, che lo consegna via email a chi è iscritto. L'indirizzo **non è nel
+codice**: vive solo nell'iscrizione SNS, quindi non finisce nel repo.
+
+| Voce | Valore |
+|---|---|
+| Topic | `arn:aws:sns:eu-north-1:163876584948:GymBooking-notifiche` |
+| Iscritto | `france.mi18@gmail.com` (protocollo `email`) |
+| Variabile Lambda | `SNS_TOPIC_ARN` |
+| Permesso | `sns:Publish` sul topic, policy inline `PublishBookingNotifications` nel ruolo della Lambda |
+| Oggetto / corpo | `GymBooking: prenotazione confermata` / `2026-11-20 07:00 - Prenotazione confermata con successo.` |
+
+La notifica è **best effort**: è dentro un `try`, e se SNS o `boto3` falliscono la funzione
+stampa `notifica non inviata: ...` e restituisce comunque la prenotazione confermata. Una
+mail persa non deve far sembrare fallita una prenotazione riuscita. L'errore resta nei log
+CloudWatch della funzione.
+
+Cambiare destinatario:
+
+```bash
+aws sns subscribe --topic-arn arn:aws:sns:eu-north-1:163876584948:GymBooking-notifiche \
+  --protocol email --notification-endpoint nuovo@example.com --region eu-north-1
+```
+
+L'iscrizione resta `PendingConfirmation` finché il destinatario non apre la mail di AWS e
+clicca il link: fino ad allora le notifiche non vengono consegnate.
+
 ## Deploy
 
 La funzione gira in `eu-north-1`, Python 3.12, 128 MB, timeout 60 s, ruolo
@@ -175,6 +206,9 @@ Coprono:
 - lezione al completo (`Notes` diverso da `Prenota`): nessun `BookAppointment`;
 - fallback attivo: prenota il primo slot prenotabile fra quelli elencati;
 - fallback spento di default: nessun ripiego senza `fallback_times`;
+- prenotazione confermata → `publish` sul topic con data e ora;
+- notifica che fallisce: la prenotazione resta valida;
+- nessun `SNS_TOPIC_ARN`: nessuna notifica, nessun errore;
 - rifiuto del portale: messaggio riportato senza dati sensibili;
 - modalità `inspect`: elenca gli slot e non chiama mai `BookAppointment`;
 - data e ora predefinite a +7 giorni e 18:15, calcolate in `Europe/Rome`.
@@ -182,8 +216,9 @@ Coprono:
 ## Costi
 
 Un'invocazione dura circa 2,5 s con 128 MB, cioè pochi millesimi di GB-secondo: resta
-dentro i 400.000 GB-s e il milione di richieste gratuite mensili di Lambda. Non sono usati
-altri servizi AWS a pagamento.
+dentro i 400.000 GB-s e il milione di richieste gratuite mensili di Lambda. Le notifiche SNS
+via email hanno 1.000 consegne gratuite al mese, ben oltre le ~13 prenotazioni mensili.
+Non sono usati altri servizi AWS a pagamento.
 
 ## Avvertenza
 

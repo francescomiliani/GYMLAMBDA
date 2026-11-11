@@ -1,6 +1,7 @@
 import contextlib
 import io
 import os
+import sys
 import unittest
 from unittest.mock import MagicMock, patch
 
@@ -135,6 +136,45 @@ class BookingTests(unittest.TestCase):
                 app.lambda_handler({'date': '2026-11-18', 'time': '08:00'}, None)
         self.assertIn('non prenotabile', str(error.exception))
         self.assertEqual(session.post.call_count, 2)  # mai BookAppointment
+
+    def test_successful_booking_sends_notification(self):
+        login, activity, booking = (MagicMock() for _ in range(3))
+        activity.json.return_value = {'data': [{'TimeStart': '07:00', 'AppointmentId': '123', 'Notes': 'Prenota'}]}
+        booking.json.return_value = {'message': 'Prenotazione confermata con successo.'}
+        session = MagicMock()
+        session.post.side_effect = [login, activity, booking]
+        fake_boto3 = MagicMock()
+        env = {'SPORTRICK_USERNAME': 'secret-user', 'SPORTRICK_PASSWORD': 'secret-pass',
+               'SNS_TOPIC_ARN': 'arn:aws:sns:eu-north-1:1:topic'}
+        with patch.dict(os.environ, env), patch.dict(sys.modules, {'boto3': fake_boto3}), \
+             patch.object(app.requests, 'Session') as factory, contextlib.redirect_stdout(io.StringIO()):
+            factory.return_value.__enter__.return_value = session
+            app.lambda_handler({'date': '2026-11-17', 'time': '07:00'}, None)
+        published = fake_boto3.client.return_value.publish.call_args.kwargs
+        self.assertEqual(published['TopicArn'], 'arn:aws:sns:eu-north-1:1:topic')
+        self.assertIn('2026-11-17 07:00', published['Message'])
+
+    def test_notification_failure_does_not_lose_the_booking(self):
+        login, activity, booking = (MagicMock() for _ in range(3))
+        activity.json.return_value = {'data': [{'TimeStart': '07:00', 'AppointmentId': '123', 'Notes': 'Prenota'}]}
+        booking.json.return_value = {'message': 'Prenotazione confermata con successo.'}
+        session = MagicMock()
+        session.post.side_effect = [login, activity, booking]
+        fake_boto3 = MagicMock()
+        fake_boto3.client.side_effect = RuntimeError('sns unavailable')
+        env = {'SPORTRICK_USERNAME': 'secret-user', 'SPORTRICK_PASSWORD': 'secret-pass',
+               'SNS_TOPIC_ARN': 'arn:aws:sns:eu-north-1:1:topic'}
+        with patch.dict(os.environ, env), patch.dict(sys.modules, {'boto3': fake_boto3}), \
+             patch.object(app.requests, 'Session') as factory, contextlib.redirect_stdout(io.StringIO()):
+            factory.return_value.__enter__.return_value = session
+            result = app.lambda_handler({'date': '2026-11-17', 'time': '07:00'}, None)
+        self.assertEqual(result['time'], '07:00')
+
+    def test_no_topic_means_no_notification(self):
+        fake_boto3 = MagicMock()
+        with patch.dict(os.environ, {'SNS_TOPIC_ARN': ''}), patch.dict(sys.modules, {'boto3': fake_boto3}):
+            app.notify({'date': '2026-11-17', 'time': '07:00', 'message': 'ok'})
+        fake_boto3.client.assert_not_called()
 
     def test_local_timezone_is_rome(self):
         self.assertEqual(app.local_now().tzinfo.key, 'Europe/Rome')
