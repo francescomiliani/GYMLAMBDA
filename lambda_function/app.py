@@ -61,7 +61,9 @@ def book(body_login, research_date):
         if message == 'Prenotazione confermata con successo.':
             print(message)
         else:
-            raise RuntimeError('Booking was not confirmed')
+            # Il messaggio del portale non è un segreto: serve a distinguere
+            # "già prenotato" da "posti esauriti" senza indovinare.
+            raise RuntimeError(f'Booking was not confirmed: {message}')
 
 # Usa la funzione lambda_handler come punto di ingresso della Lambda
 # lambda_handler("", "")
