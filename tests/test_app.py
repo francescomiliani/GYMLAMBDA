@@ -8,12 +8,24 @@ from unittest.mock import MagicMock, patch
 from lambda_function import app
 
 
+def session_with_login():
+    session = MagicMock()
+    session.get.return_value.text = '<input type="hidden" name="__RequestVerificationToken" value="token">'
+    return session
+
+
+def successful_login(login):
+    login.status_code = 302
+    login.headers = {'Location': '/replywellnessTO'}
+
+
 class BookingTests(unittest.TestCase):
     def test_login_and_booking(self):
         login, activity, booking = (MagicMock() for _ in range(3))
+        successful_login(login)
         activity.json.return_value = {'data': [{'TimeStart': '18:15', 'AppointmentId': '123', 'Notes': 'Prenota'}]}
         booking.json.return_value = {'message': 'Prenotazione confermata con successo.'}
-        session = MagicMock()
+        session = session_with_login()
         session.post.side_effect = [login, activity, booking]
         output = io.StringIO()
         with patch.dict(os.environ, {'SPORTRICK_USERNAME': 'secret-user', 'SPORTRICK_PASSWORD': 'secret-pass'}), \
@@ -21,14 +33,14 @@ class BookingTests(unittest.TestCase):
             factory.return_value.__enter__.return_value = session
             app.lambda_handler({}, None)
         calls = session.post.call_args_list
-        self.assertEqual(calls[0].kwargs['data'], {'UserName': 'secret-user', 'Password': 'secret-pass'})
+        self.assertEqual(calls[0].kwargs['data'], {'UserName': 'secret-user', 'Password': 'secret-pass', '__RequestVerificationToken': 'token'})
         self.assertEqual(calls[2].kwargs['data'], {'appointmentID': '123'})
         self.assertTrue(all(call.kwargs['timeout'] == 15 for call in calls))
         self.assertNotIn('secret-user', output.getvalue())
         self.assertNotIn('secret-pass', output.getvalue())
 
     def test_failure_does_not_expose_response_or_credentials(self):
-        session = MagicMock()
+        session = session_with_login()
         session.post.side_effect = app.requests.RequestException('secret-user secret-pass')
         output = io.StringIO()
         with patch.dict(os.environ, {'SPORTRICK_USERNAME': 'secret-user', 'SPORTRICK_PASSWORD': 'secret-pass'}), \
@@ -48,11 +60,12 @@ class BookingTests(unittest.TestCase):
 
     def test_inspect_lists_slots_without_booking(self):
         login, activity, page = (MagicMock() for _ in range(3))
+        successful_login(login)
         activity.json.return_value = {'data': [{'TimeStart': '07:00', 'AppointmentId': '123'}]}
         page.text = '<form action="/Booking/BookAppointment"></form>'
-        session = MagicMock()
+        session = session_with_login()
         session.post.side_effect = [login, activity]
-        session.get.return_value = page
+        session.get.side_effect = [session.get.return_value, page]
         with patch.dict(os.environ, {'SPORTRICK_USERNAME': 'secret-user', 'SPORTRICK_PASSWORD': 'secret-pass'}), \
              patch.object(app.requests, 'Session') as factory, contextlib.redirect_stdout(io.StringIO()):
             factory.return_value.__enter__.return_value = session
@@ -62,8 +75,9 @@ class BookingTests(unittest.TestCase):
 
     def test_missing_time_never_calls_booking(self):
         login, activity = MagicMock(), MagicMock()
+        successful_login(login)
         activity.json.return_value = {'data': [{'TimeStart': '18:15', 'AppointmentId': '123', 'Notes': 'Prenota'}]}
-        session = MagicMock()
+        session = session_with_login()
         session.post.side_effect = [login, activity]
         with patch.dict(os.environ, {'SPORTRICK_USERNAME': 'secret-user', 'SPORTRICK_PASSWORD': 'secret-pass'}), \
              patch.object(app.requests, 'Session') as factory, contextlib.redirect_stdout(io.StringIO()), \
@@ -76,12 +90,13 @@ class BookingTests(unittest.TestCase):
 
     def test_fallback_books_next_available_slot(self):
         login, activity, booking = (MagicMock() for _ in range(3))
+        successful_login(login)
         activity.json.return_value = {'data': [
             {'TimeStart': '07:00', 'AppointmentId': 'full', 'Notes': 'Lezione al completo.'},
             {'TimeStart': '13:30', 'AppointmentId': 'free', 'Notes': 'Prenota'},
         ]}
         booking.json.return_value = {'message': 'Prenotazione confermata con successo.'}
-        session = MagicMock()
+        session = session_with_login()
         session.post.side_effect = [login, activity, booking]
         with patch.dict(os.environ, {'SPORTRICK_USERNAME': 'secret-user', 'SPORTRICK_PASSWORD': 'secret-pass'}), \
              patch.object(app.requests, 'Session') as factory, contextlib.redirect_stdout(io.StringIO()):
@@ -92,11 +107,12 @@ class BookingTests(unittest.TestCase):
 
     def test_fallback_is_disabled_by_default(self):
         login, activity = MagicMock(), MagicMock()
+        successful_login(login)
         activity.json.return_value = {'data': [
             {'TimeStart': '07:00', 'AppointmentId': 'full', 'Notes': 'Lezione al completo.'},
             {'TimeStart': '13:30', 'AppointmentId': 'free', 'Notes': 'Prenota'},
         ]}
-        session = MagicMock()
+        session = session_with_login()
         session.post.side_effect = [login, activity]
         with patch.dict(os.environ, {'SPORTRICK_USERNAME': 'secret-user', 'SPORTRICK_PASSWORD': 'secret-pass'}), \
              patch.object(app.requests, 'Session') as factory, contextlib.redirect_stdout(io.StringIO()):
@@ -107,9 +123,10 @@ class BookingTests(unittest.TestCase):
 
     def test_rejected_booking_reports_portal_message(self):
         login, activity, booking = (MagicMock() for _ in range(3))
+        successful_login(login)
         activity.json.return_value = {'data': [{'TimeStart': '07:00', 'AppointmentId': '123', 'Notes': 'Prenota'}]}
         booking.json.return_value = {'message': 'Lezione al completo.'}
-        session = MagicMock()
+        session = session_with_login()
         session.post.side_effect = [login, activity, booking]
         output = io.StringIO()
         with patch.dict(os.environ, {'SPORTRICK_USERNAME': 'secret-user', 'SPORTRICK_PASSWORD': 'secret-pass'}), \
@@ -123,11 +140,12 @@ class BookingTests(unittest.TestCase):
 
     def test_full_lesson_is_not_booked(self):
         login, activity = MagicMock(), MagicMock()
+        successful_login(login)
         activity.json.return_value = {'data': [{
             'TimeStart': '08:00', 'AppointmentId': '123',
             'Notes': "Lezione al completo. Vuoi metterti in lista d'attesa?",
         }]}
-        session = MagicMock()
+        session = session_with_login()
         session.post.side_effect = [login, activity]
         with patch.dict(os.environ, {'SPORTRICK_USERNAME': 'secret-user', 'SPORTRICK_PASSWORD': 'secret-pass'}), \
              patch.object(app.requests, 'Session') as factory, contextlib.redirect_stdout(io.StringIO()):
@@ -139,9 +157,10 @@ class BookingTests(unittest.TestCase):
 
     def test_successful_booking_sends_notification(self):
         login, activity, booking = (MagicMock() for _ in range(3))
+        successful_login(login)
         activity.json.return_value = {'data': [{'TimeStart': '07:00', 'AppointmentId': '123', 'Notes': 'Prenota'}]}
         booking.json.return_value = {'message': 'Prenotazione confermata con successo.'}
-        session = MagicMock()
+        session = session_with_login()
         session.post.side_effect = [login, activity, booking]
         fake_boto3 = MagicMock()
         env = {'SPORTRICK_USERNAME': 'secret-user', 'SPORTRICK_PASSWORD': 'secret-pass',
@@ -156,9 +175,10 @@ class BookingTests(unittest.TestCase):
 
     def test_notification_failure_does_not_lose_the_booking(self):
         login, activity, booking = (MagicMock() for _ in range(3))
+        successful_login(login)
         activity.json.return_value = {'data': [{'TimeStart': '07:00', 'AppointmentId': '123', 'Notes': 'Prenota'}]}
         booking.json.return_value = {'message': 'Prenotazione confermata con successo.'}
-        session = MagicMock()
+        session = session_with_login()
         session.post.side_effect = [login, activity, booking]
         fake_boto3 = MagicMock()
         fake_boto3.client.side_effect = RuntimeError('sns unavailable')
@@ -182,9 +202,10 @@ class BookingTests(unittest.TestCase):
 
     def test_defaults_to_seven_days_ahead_at_1815(self):
         login, activity, booking = (MagicMock() for _ in range(3))
+        successful_login(login)
         activity.json.return_value = {'data': [{'TimeStart': '18:15', 'AppointmentId': '123', 'Notes': 'Prenota'}]}
         booking.json.return_value = {'message': 'Prenotazione confermata con successo.'}
-        session = MagicMock()
+        session = session_with_login()
         session.post.side_effect = [login, activity, booking]
         expected = (app.local_now() + app.datetime.timedelta(days=7)).strftime('%Y-%m-%d')
         with patch.dict(os.environ, {'SPORTRICK_USERNAME': 'secret-user', 'SPORTRICK_PASSWORD': 'secret-pass'}), \

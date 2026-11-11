@@ -4,24 +4,26 @@ import os
 import re
 from zoneinfo import ZoneInfo
 
+if __package__:
+    from .sportrick import SportrickClient, require_date, require_id
+else:
+    from sportrick import SportrickClient, require_date, require_id
+
 # Il runtime Lambda vive in UTC: la data va calcolata nel fuso della palestra,
 # altrimenti tra mezzanotte e le 02:00 italiane si prenota il giorno sbagliato.
 LOCAL_TZ = ZoneInfo('Europe/Rome')
 
-login_url = 'https://ecomm.sportrick.com/replywellnessTO/Account/Login?returnUrl=%2FreplywellnessTO'
 booking_url = 'https://ecomm.sportrick.com/replywellnessTO/Booking/BookAppointment'
 activity_url = 'https://ecomm.sportrick.com/replywellnessTO/Booking/GetActivitySchedule'
 booking_page_url = 'https://ecomm.sportrick.com/replywellnessTO/Booking/BookActivity?activityId=224715757956816031&activityFlags=Classes'
-headers_login = {
-    'Content-Type': 'application/x-www-form-urlencoded',
-    'Referer': login_url
-}
 headers_booking = {'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8'}
 # headers_activity = {'Content-Type': 'application/x-www-form-urlencoded; charset=UTF-8'  }
     # 'Referer':'https://ecomm.sportrick.com/replywellnessTO/Booking/BookActivity?activityId=224715757956816031&activityFlags=Classes'
 
 def lambda_handler(event, context):
     event = event or {}
+    if 'action' in event:
+        return dispatch(event)
     username = os.environ.get('SPORTRICK_USERNAME')
     password = os.environ.get('SPORTRICK_PASSWORD')
     if not username or not password:
@@ -38,29 +40,76 @@ def lambda_handler(event, context):
         raise RuntimeError('Sportrick request or response failed') from None
 
 
+def dispatch(event):
+    action = event['action']
+    fields = {
+        'activities': (), 'bookings': (), 'schedule': ('activity_id', 'date'),
+        'book': ('activity_id', 'date', 'appointment_id'),
+        'cancel': ('booking_id',), 'waitlist_join': ('appointment_id',),
+        'waitlist_leave': ('booking_id',), 'waitlist_confirm': ('booking_id',),
+    }
+    if action not in fields:
+        raise ValueError('Azione non riconosciuta')
+    args = []
+    for name in fields[action]:
+        value = event.get(name)
+        args.append(require_date(value) if name == 'date' else require_id(value))
+    username = os.environ.get('SPORTRICK_USERNAME')
+    password = os.environ.get('SPORTRICK_PASSWORD')
+    if not username or not password:
+        raise RuntimeError('Sportrick credentials are not configured')
+    try:
+        with requests.Session() as session:
+            client = SportrickClient(session)
+            client.login(username, password)
+            result = getattr(client, action)(*args)
+            if action in ('book', 'cancel') and result.get('status') == 'confirmed':
+                result = notify(result, action)
+            return {action: result} if action in ('activities', 'schedule', 'bookings') else result
+    except requests.RequestException:
+        raise RuntimeError('Sportrick request failed') from None
+
+
 def local_now():
     return datetime.datetime.now(LOCAL_TZ)
 
 
 # La notifica non deve mai far fallire una prenotazione già confermata.
-def notify(result):
+def notify(result, action='book'):
+    label = 'cancellazione confermata' if action == 'cancel' else 'prenotazione confermata'
+    message = f"{result['date']} {result['time']} - {result.get('course') or 'SALA ATTREZZI'} - {label}"
+    notifications = {}
     topic = os.environ.get('SNS_TOPIC_ARN')
     if topic:
         try:
             import boto3  # import locale: la notifica è opzionale, il resto no
-            boto3.client('sns').publish(
+            config = boto3.session.Config(connect_timeout=3, read_timeout=5, retries={'total_max_attempts': 1})
+            boto3.client('sns', config=config).publish(
                 TopicArn=topic,
-                Subject='GymBooking: prenotazione confermata',
-                Message=f"{result['date']} {result['time']} - {result['message']}",
+                Subject=f'GymBooking: {label}',
+                Message=message,
             )
-        except Exception as error:
-            print(f'notifica non inviata: {error}')
+            notifications['sns'] = 'accepted'
+        except Exception:
+            notifications['sns'] = 'failed'
+    token = os.environ.get('TELEGRAM_BOT_TOKEN')
+    chat_id = os.environ.get('TELEGRAM_CHAT_ID')
+    if token or chat_id:
+        notifications['telegram'] = 'failed'
+        if token and chat_id:
+            try:
+                response = requests.post(f'https://api.telegram.org/bot{token}/sendMessage', json={'chat_id': chat_id, 'text': message}, timeout=15)
+                response.raise_for_status()
+                if response.json().get('ok') is True:
+                    notifications['telegram'] = 'accepted'
+            except (requests.RequestException, ValueError, TypeError, AttributeError):
+                pass
+    result['notifications'] = notifications
     return result
 
 
 def login(session, body_login):
-    response_login = session.post(login_url, headers=headers_login, data=body_login, allow_redirects=False, timeout=15)
-    response_login.raise_for_status()
+    SportrickClient(session).login(body_login['UserName'], body_login['Password'])
 
 
 def schedule(session, research_date):

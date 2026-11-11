@@ -1,10 +1,18 @@
 ---
-status: planned
-phase: 1
+status: in-progress
+phase: 4
 updated: 2026-11-11
 ---
 
 # Piano: corsi e prenotazioni Sportrick
+
+**Stato 11/11/2026:** implementati catalogo, calendari, impegni, prenotazioni di lezioni,
+cancellazione e lista d'attesa. Verifica reale completata su Functional Training del 16/11
+alle 18:30: prenotazione e cancellazione riuscite, email SNS e Telegram ricevuti. La lista
+d'attesa rimane verificata con mock e analisi del portale. Nessuno slot di Visita medica disponibile: prenotazioni `service`
+non implementate. SAM e Python 3.12 non disponibili localmente; nessun deploy eseguito.
+La conferma dalla lista usa `booking_id` (il campo HTTP è chiamato `appointmentId`); la
+prenotazione di una lezione richiede anche `activity_id` e `date` per verificare lo slot.
 
 **Obiettivo:** estendere GymBooking con la consultazione dei corsi e degli impegni e la gestione esplicita di prenotazioni e liste d'attesa, mantenendo la Lambda esistente.
 
