@@ -1,0 +1,217 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Telegram bot and asynchronous worker (does not create or modify a schedule).
+
+Parameters:
+  TelegramAllowedUserId:
+    Type: String
+    MinLength: 1
+  TelegramBotTokenParameterName:
+    Type: String
+    Default: /gymbot/telegram-bot-token
+    AllowedPattern: '/[0-9A-Za-z_.\/-]+'
+    Description: Name (not value) of the SSM parameter holding the Telegram bot token.
+  TelegramWebhookSecretParameterName:
+    Type: String
+    Default: /gymbot/telegram-webhook-secret
+    AllowedPattern: '/[0-9A-Za-z_.\/-]+'
+    Description: Name (not value) of the SSM parameter holding the webhook secret.
+  SportrickUsernameParameterName:
+    Type: String
+    Default: /gymbot/sportrick-username
+    AllowedPattern: '/[0-9A-Za-z_.\/-]+'
+    Description: Name (not value) of the SSM parameter holding the Sportrick username.
+  SportrickPasswordParameterName:
+    Type: String
+    Default: /gymbot/sportrick-password
+    AllowedPattern: '/[0-9A-Za-z_.\/-]+'
+    Description: Name (not value) of the SSM parameter holding the Sportrick password.
+  ScheduleName:
+    Type: String
+    AllowedPattern: '[0-9A-Za-z_.-]{1,64}'
+  ScheduleGroup:
+    Type: String
+    Default: default
+    AllowedPattern: '[0-9A-Za-z_.-]{1,64}'
+  ScheduleRoleArn:
+    Type: String
+    Description: Existing execution role ARN in the schedule target; required for UpdateSchedule.
+    MinLength: 1
+  BookingTime:
+    Type: String
+    Default: '07:00'
+    AllowedPattern: '([01][0-9]|2[0-3]):[0-5][0-9]'
+  SnsTopicArn:
+    Type: String
+    Default: ''
+
+Conditions:
+  HasSnsTopic: !Not [!Equals [!Ref SnsTopicArn, '']]
+
+Globals:
+  Function:
+    Runtime: python3.12
+    CodeUri: build/bot-package/
+    MemorySize: 128
+    Timeout: 60
+
+Resources:
+  BotTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      BillingMode: PROVISIONED
+      TableClass: STANDARD
+      AttributeDefinitions:
+        - AttributeName: pk
+          AttributeType: S
+      KeySchema:
+        - AttributeName: pk
+          KeyType: HASH
+      ProvisionedThroughput:
+        ReadCapacityUnits: 1
+        WriteCapacityUnits: 1
+      TimeToLiveSpecification:
+        AttributeName: purge_at
+        Enabled: true
+
+  WebhookFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: telegram_bot.lambda_handler
+      FunctionUrlConfig:
+        AuthType: NONE
+      Environment:
+        Variables:
+          SSM_TELEGRAM_BOT_TOKEN: !Ref TelegramBotTokenParameterName
+          TELEGRAM_ALLOWED_USER_ID: !Ref TelegramAllowedUserId
+          SSM_TELEGRAM_WEBHOOK_SECRET: !Ref TelegramWebhookSecretParameterName
+          SSM_SPORTRICK_USERNAME: !Ref SportrickUsernameParameterName
+          SSM_SPORTRICK_PASSWORD: !Ref SportrickPasswordParameterName
+          BOT_TABLE_NAME: !Ref BotTable
+          BOT_SCHEDULE_NAME: !Ref ScheduleName
+          BOT_SCHEDULE_GROUP: !Ref ScheduleGroup
+          BOT_WORKER_FUNCTION: !Ref WorkerFunction
+          BOT_ASYNC_READS: '1'
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:PutItem
+                - dynamodb:UpdateItem
+                - dynamodb:DeleteItem
+              Resource: !GetAtt BotTable.Arn
+            - Effect: Allow
+              Action: lambda:InvokeFunction
+              Resource: !GetAtt WorkerFunction.Arn
+            - Effect: Allow
+              Action:
+                - scheduler:GetSchedule
+                - scheduler:UpdateSchedule
+              Resource: !Sub 'arn:${AWS::Partition}:scheduler:${AWS::Region}:${AWS::AccountId}:schedule/${ScheduleGroup}/${ScheduleName}'
+            - Effect: Allow
+              Action: iam:PassRole
+              Resource: !Ref ScheduleRoleArn
+              Condition:
+                StringEquals:
+                  iam:PassedToService: scheduler.amazonaws.com
+            - Effect: Allow
+              Action: ssm:GetParameter
+              Resource:
+                - !Sub 'arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter${TelegramBotTokenParameterName}'
+                - !Sub 'arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter${TelegramWebhookSecretParameterName}'
+                - !Sub 'arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter${SportrickUsernameParameterName}'
+                - !Sub 'arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter${SportrickPasswordParameterName}'
+
+  WorkerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: telegram_worker.lambda_handler
+      Timeout: 180
+      EventInvokeConfig:
+        MaximumRetryAttempts: 0
+        MaximumEventAgeInSeconds: 60
+      Environment:
+        Variables:
+          SSM_TELEGRAM_BOT_TOKEN: !Ref TelegramBotTokenParameterName
+          TELEGRAM_CHAT_ID: !Ref TelegramAllowedUserId
+          SSM_SPORTRICK_USERNAME: !Ref SportrickUsernameParameterName
+          SSM_SPORTRICK_PASSWORD: !Ref SportrickPasswordParameterName
+          BOT_TABLE_NAME: !Ref BotTable
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:PutItem
+                - dynamodb:UpdateItem
+              Resource: !GetAtt BotTable.Arn
+            - Effect: Allow
+              Action: ssm:GetParameter
+              Resource:
+                - !Sub 'arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter${TelegramBotTokenParameterName}'
+                - !Sub 'arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter${SportrickUsernameParameterName}'
+                - !Sub 'arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter${SportrickPasswordParameterName}'
+
+  ScheduledGuardFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: scheduled_guard.lambda_handler
+      Timeout: 180
+      EventInvokeConfig:
+        MaximumRetryAttempts: 0
+        MaximumEventAgeInSeconds: 60
+      Environment:
+        Variables:
+          BOT_SCHEDULE_ARN: !Sub 'arn:${AWS::Partition}:scheduler:${AWS::Region}:${AWS::AccountId}:schedule/${ScheduleGroup}/${ScheduleName}'
+          BOT_TABLE_NAME: !Ref BotTable
+          BOT_BOOKING_TIME: !Ref BookingTime
+          SSM_SPORTRICK_USERNAME: !Ref SportrickUsernameParameterName
+          SSM_SPORTRICK_PASSWORD: !Ref SportrickPasswordParameterName
+          SSM_TELEGRAM_BOT_TOKEN: !Ref TelegramBotTokenParameterName
+          TELEGRAM_CHAT_ID: !Ref TelegramAllowedUserId
+          SNS_TOPIC_ARN: !Ref SnsTopicArn
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:PutItem
+                - dynamodb:UpdateItem
+              Resource: !GetAtt BotTable.Arn
+            - Effect: Allow
+              Action: ssm:GetParameter
+              Resource:
+                - !Sub 'arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter${TelegramBotTokenParameterName}'
+                - !Sub 'arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter${SportrickUsernameParameterName}'
+                - !Sub 'arn:${AWS::Partition}:ssm:${AWS::Region}:${AWS::AccountId}:parameter${SportrickPasswordParameterName}'
+            - !If
+              - HasSnsTopic
+              - Effect: Allow
+                Action: sns:Publish
+                Resource: !Ref SnsTopicArn
+              - !Ref AWS::NoValue
+
+  WebhookLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${WebhookFunction}'
+      RetentionInDays: 7
+
+  WorkerLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${WorkerFunction}'
+      RetentionInDays: 7
+
+  ScheduledGuardLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${ScheduledGuardFunction}'
+      RetentionInDays: 7
+
+Outputs:
+  WebhookUrl:
+    Value: !GetAtt WebhookFunctionUrl.FunctionUrl
+  ScheduledGuardArn:
+    Value: !GetAtt ScheduledGuardFunction.Arn

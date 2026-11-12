@@ -1,5 +1,6 @@
 lambda_function/credentials.json
 .aws-sam/
+build/
 __pycache__/
 *.py[cod]
 .venv/

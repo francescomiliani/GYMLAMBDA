@@ -25,6 +25,35 @@ dopo**; la funzione si può anche invocare a mano con data e orario.
 Le nuove azioni esplicite consentono anche di consultare attività, calendari e impegni,
 e gestire prenotazioni di lezioni e liste d'attesa. Non richiedono una schedule.
 
+## Bot Telegram interattivo: sviluppo locale
+
+Il repository contiene un bot privato in sviluppo e il template separato
+`bot-template.yaml`. Distribuito il 12/11/2026 come stack `gymbot-telegram` (eu-north-1). I segreti sono in
+SSM Parameter Store (`/gymbot/*`, SecureString). Pacchetto: `python3 scripts/build_bot_package.py`,
+poi `sam build/deploy` con Python 3.12. Rollback: `deleteWebhook` su Telegram e
+`aws cloudformation delete-stack --stack-name gymbot-telegram`. La concorrenza riservata del
+webhook non è utilizzabile (limite account): modifiche schedule concorrenti non sono serializzate.
+La guardia `scheduled_guard` è distribuita ma non è il target della schedule. Il bot non deve essere distribuito prima della revisione
+dell'integrazione, della verifica delle quote e di un'approvazione esplicita.
+
+Il menu consente di consultare attività e impegni, scegliere giorno e lezione e
+confermare le operazioni; sono disponibili anche comandi testuali in `/help`. Le
+prenotazioni e le azioni sulla lista d'attesa possono modificare realmente il portale.
+Per un esito incerto verifica gli impegni prima di riprovare. I servizi non supportati
+non sono prenotabili dal bot.
+
+L'automazione può essere consultata e sospesa; giorni e ora sono modificabili solo a
+schedule disattivata. **La riattivazione dal bot è bloccata**: i retry della schedule
+esistente possono ripetere una prenotazione e la funzione non è idempotente. La
+configurazione non va riattivata senza una soluzione verificata e autorizzazione.
+Le notifiche indicano l'esito dell'operazione, non la lettura del messaggio Telegram.
+
+Il template prevede Lambda, Function URL e DynamoDB provisioned. Le quote gratuite sono
+condivise e non sono un tetto di spesa; l'URL pubblica può consumare invocazioni anche
+per richieste non autorizzate. Prima di qualsiasi deploy verificare costi, permessi,
+payload, retry, rollback e risorse correnti. Non inserire token o credenziali nel codice,
+nel repository o nei comandi mostrati nei log.
+
 ## Come funziona
 
 Il flusso precedente usa un'unica sessione, poi invia una notifica:
