@@ -14,4 +14,5 @@ esegue mutazioni sul portale.
 
 | File | Quando leggerlo |
 |---|---|
-| `docs/architecture/telegram-bot-aws.md` | Risorse AWS dello stack `gymbot-telegram`, flusso webhook, worker e guardia, stato DynamoDB, segreti, limiti noti. |
+| [telegram-bot-aws.md](telegram-bot-aws.md) | Architettura e diagramma del bot, flussi webhook, worker e guardia, risorse AWS, segreti e limiti noti. |
+| [architecture.drawio](architecture.drawio) / [PNG](architecture.drawio.png) | Diagramma modificabile e anteprima dell'architettura locale. |
