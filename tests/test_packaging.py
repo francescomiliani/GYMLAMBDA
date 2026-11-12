@@ -12,7 +12,7 @@ class LambdaPackagingTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             package = Path(directory) / 'function.zip'
             with ZipFile(package, 'w') as archive:
-                for filename in ('app.py', 'sportrick.py'):
+                for filename in ('app.py', 'sportrick.py', 'ssm_config.py'):
                     archive.write(source / filename, filename)
             script = (
                 'import sys; sys.path.insert(0, sys.argv[1]); import app; '

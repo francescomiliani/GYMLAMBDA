@@ -6,8 +6,10 @@ from zoneinfo import ZoneInfo
 
 if __package__:
     from .sportrick import SportrickClient, require_date, require_id
+    from .ssm_config import get_secret
 else:
     from sportrick import SportrickClient, require_date, require_id
+    from ssm_config import get_secret
 
 # Il runtime Lambda vive in UTC: la data va calcolata nel fuso della palestra,
 # altrimenti tra mezzanotte e le 02:00 italiane si prenota il giorno sbagliato.
@@ -24,8 +26,8 @@ def lambda_handler(event, context):
     event = event or {}
     if 'action' in event:
         return dispatch(event)
-    username = os.environ.get('SPORTRICK_USERNAME')
-    password = os.environ.get('SPORTRICK_PASSWORD')
+    username = get_secret('SPORTRICK_USERNAME')
+    password = get_secret('SPORTRICK_PASSWORD')
     if not username or not password:
         raise RuntimeError('Sportrick credentials are not configured')
     body_login = {'UserName': username, 'Password': password}
@@ -54,8 +56,8 @@ def dispatch(event):
     for name in fields[action]:
         value = event.get(name)
         args.append(require_date(value) if name == 'date' else require_id(value))
-    username = os.environ.get('SPORTRICK_USERNAME')
-    password = os.environ.get('SPORTRICK_PASSWORD')
+    username = get_secret('SPORTRICK_USERNAME')
+    password = get_secret('SPORTRICK_PASSWORD')
     if not username or not password:
         raise RuntimeError('Sportrick credentials are not configured')
     try:
@@ -92,7 +94,12 @@ def notify(result, action='book'):
             notifications['sns'] = 'accepted'
         except Exception:
             notifications['sns'] = 'failed'
-    token = os.environ.get('TELEGRAM_BOT_TOKEN')
+    try:
+        token = get_secret('TELEGRAM_BOT_TOKEN')
+    except Exception:
+        token = None
+        if os.environ.get('SSM_TELEGRAM_BOT_TOKEN') and os.environ.get('TELEGRAM_CHAT_ID'):
+            notifications['telegram'] = 'failed'
     chat_id = os.environ.get('TELEGRAM_CHAT_ID')
     if token or chat_id:
         notifications['telegram'] = 'failed'
