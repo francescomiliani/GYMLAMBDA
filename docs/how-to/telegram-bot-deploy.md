@@ -77,4 +77,25 @@ Non impostare `ReservedConcurrentExecutions`: il limite dell'account lo rifiuta.
 2. `aws cloudformation delete-stack --stack-name gymbot-telegram --region eu-north-1 --profile aws-personale`
 3. Facoltativo: eliminare i parametri `/gymbot/*` e il bucket S3 creato da SAM.
 
-La schedule e la Lambda legacy non vengono toccate.
+La Lambda legacy non viene toccata. Dal 2026-11-12 la schedule punta al guard (vedi sotto).
+
+## Migrazione schedule al guard (2026-11-12)
+
+La schedule `gym-booking-mwf-0700` (sempre `DISABLED`) ora invoca `scheduled_guard`
+invece della Lambda legacy `GymBooking-personale`:
+
+- Payload `{"schedule_arn": <arn>, "scheduled_time": "<aws.scheduler.scheduled-time>"}`.
+- Retry 0, `MaximumEventAgeInSeconds` 60 (prima 185 retry / 86400 s).
+- Il guard registra l'occorrenza in DynamoDB (at-most-once) e poi chiama la legacy.
+- Ruolo scheduler: aggiunta la policy inline `InvokeGymBookingGuard`; la vecchia
+  `InvokeGymBooking` e' stata lasciata come backup per il rollback.
+- La Lambda legacy resta deployata e invocabile direttamente.
+- Il guard prenota sempre l'orario `BookingTime` (default 07:00) a +7 giorni dalla
+  data schedulata. Se cambi l'orario via `/weekly`, aggiorna anche `BookingTime`.
+
+Rollback della sola schedule (lasciarla `DISABLED`): `update-schedule` con target
+`arn:aws:lambda:eu-north-1:163876584948:function:GymBooking-personale`, `Input`
+`{"time":"07:00"}`, `RetryPolicy` 185 tentativi / 86400 s, stesso `RoleArn`. Passa tutti
+i campi (`update-schedule` azzera quelli omessi).
+
+`/enable` dal bot resta bloccato finche' non viene deciso diversamente (ADR 0002).
