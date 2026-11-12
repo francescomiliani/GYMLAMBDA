@@ -12,6 +12,8 @@ relevant-code:
   - lambda_function/bot_scheduler.py
   - lambda_function/scheduled_guard.py
   - lambda_function/ssm_config.py
+  - lambda_function/app.py
+  - lambda_function/sportrick.py
   - scripts/build_bot_package.py
 ---
 
@@ -20,6 +22,29 @@ relevant-code:
 Bot privato per consultare e gestire le prenotazioni Sportrick e controllare la
 schedule. Stack CloudFormation `gymbot-telegram`, account `163876584948`,
 regione `eu-north-1`, profilo CLI `aws-personale`.
+
+## Architettura implementata
+
+![Architettura locale del bot GymBooking](architecture.drawio.png)
+
+[Apri il diagramma modificabile](architecture.drawio). Il diagramma descrive il
+codice e il template nel repository, non certifica lo stato attuale delle risorse
+AWS. Le informazioni sulle risorse distribuite sotto sono uno snapshot da
+verificare prima di operare.
+
+- Telegram invia gli aggiornamenti alla Function URL del webhook. Il codice
+  verifica secret, metodo, utente e chat; le letture possono essere inoltrate al
+  worker asincrono.
+- Per una mutazione il webhook registra una conferma in DynamoDB; dopo la
+  conferma accoda il job. Il worker usa il client Sportrick condiviso, registra
+  l'esito e invia la notifica. Un esito incerto non autorizza nuovi tentativi
+  automatici.
+- La guardia schedulata implementa un claim persistente dell'occorrenza prima
+  di avviare il flusso legacy. È separata dal webhook: il collegamento effettivo
+  alla schedule deve essere verificato e lo snapshot sottostante lo indica come
+  non attivo.
+- Il bot legge e modifica la schedule nei limiti descritti sotto. SSM fornisce
+  i segreti a runtime; le notifiche legacy possono usare SNS o Telegram.
 
 ## Risorse
 
