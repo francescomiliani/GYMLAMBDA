@@ -49,9 +49,15 @@ garantito.
 
 ## Azioni aperte
 
-- Creare un Budget AWS con alert email (gratuito, per esempio 1 USD). Non creato:
-  serve l'indirizzo email scelto dall'utente.
 - Controllare periodicamente crediti e consumi in Billing.
+
+## Budget attivo
+
+Creato il 2026-11-12 (API Budgets, regione `us-east-1`): `gymbot-monthly-1usd`,
+costo mensile con limite 1 USD, crediti esclusi dal calcolo (misura il consumo
+lordo, non quello coperto dai crediti). Alert email all'indirizzo dell'account
+AWS quando il costo effettivo supera l'80% e il 100%. L'indirizzo non e'
+riportato nel repository. Il budget non blocca le risorse: avvisa soltanto.
 
 ## Fonti
 
