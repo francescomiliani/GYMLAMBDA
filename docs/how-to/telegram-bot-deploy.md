@@ -58,6 +58,11 @@ Non impostare `ReservedConcurrentExecutions`: il limite dell'account lo rifiuta.
   al parametro SSM e `allowed_updates=["message","callback_query"]`.
 - `setMyCommands`: `start`, `bookings`, `activities`, `automation`, `weekly`,
   `disable`, `help`. Il menu non si aggiorna da solo.
+  Telegram usa lo scope piu' specifico: un elenco su `all_private_chats` o
+  `all_group_chats` nasconde quello `default`. Imposta tutti e tre gli scope e
+  verifica ciascuno con `getMyCommands`. Il client ha una cache: riapri la chat.
+  Incidente del 2026-11-12: un vecchio elenco `/hello` su `all_private_chats`
+  nascondeva i comandi del bot.
 
 ## 5. Verifica
 
