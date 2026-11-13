@@ -15,8 +15,10 @@ from boto3.dynamodb.types import TypeDeserializer, TypeSerializer
 from botocore.exceptions import ClientError
 
 
-class StoreConflict(Exception):
-    """A confirmation, update, or job is invalid or already claimed."""
+if __package__:
+    from .store_conflict import StoreConflict
+else:
+    from store_conflict import StoreConflict
 
 
 RETENTION_SECONDS = 7 * 24 * 60 * 60

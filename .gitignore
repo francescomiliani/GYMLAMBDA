@@ -7,3 +7,8 @@ __pycache__/
 .env
 .env.*
 .unlazy/
+.DS_Store
+config.local.json
+*.sqlite3
+*.sqlite3-*
+*.sqlite3.lock

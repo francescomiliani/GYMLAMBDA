@@ -12,18 +12,17 @@ import time
 from zoneinfo import ZoneInfo
 
 import requests
-from botocore.exceptions import ClientError
 
 if __package__:
     from . import telegram_worker
     from .bot_scheduler import BotScheduler, fingerprint
-    from .bot_store import BotStore, StoreConflict
+    from .store_conflict import StoreConflict
     from .sportrick import require_date, require_id
     from .ssm_config import get_secret
 else:
     import telegram_worker
     from bot_scheduler import BotScheduler, fingerprint
-    from bot_store import BotStore, StoreConflict
+    from store_conflict import StoreConflict
     from sportrick import require_date, require_id
     from ssm_config import get_secret
 
@@ -44,6 +43,10 @@ class TelegramError(Exception):
 
 def _store():
     import boto3
+    if __package__:
+        from .bot_store import BotStore
+    else:
+        from bot_store import BotStore
     return BotStore(boto3.client('dynamodb'), os.environ['BOT_TABLE_NAME'])
 
 
@@ -113,6 +116,7 @@ def _format_read(action, result):
 
 
 def _cancel_confirmation(store, confirmation, owner):
+    from botocore.exceptions import ClientError
     try:
         store.client.delete_item(
             TableName=store.table_name,

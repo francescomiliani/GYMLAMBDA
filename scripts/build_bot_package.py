@@ -21,6 +21,7 @@ ALLOWLIST = (
     'requirements.txt',
     'scheduled_guard.py',
     'ssm_config.py',
+    'store_conflict.py',
     'sportrick.py',
     'telegram_bot.py',
     'telegram_worker.py',

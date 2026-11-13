@@ -25,6 +25,10 @@ dopo**; la funzione si può anche invocare a mano con data e orario.
 Le nuove azioni esplicite consentono anche di consultare attività, calendari e impegni,
 e gestire prenotazioni di lezioni e liste d'attesa. Non richiedono una schedule.
 
+## Bot Telegram locale senza AWS
+
+Per Raspberry Pi o Linux, installazione, passaggio dal webhook e gestione: [guida al bot locale](docs/how-to/telegram-bot-locale.md). Usa lo stesso bot Telegram; il passaggio interrompe la ricezione webhook AWS.
+
 ## Bot Telegram interattivo: sviluppo locale
 
 Il repository contiene un bot privato in sviluppo e il template separato
