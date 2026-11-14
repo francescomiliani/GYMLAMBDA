@@ -143,7 +143,7 @@ class TelegramHandlerTests(unittest.TestCase):
         self.addCleanup(self.env.stop)
 
     def test_outcomes_are_notified_only_after_persisting(self):
-        for status, label in (('confirmed', 'confermato'), ('rejected', 'rifiutato'), ('uncertain', 'incerto')):
+        for status, label in (('confirmed', '✅ Esito operazione: confermato'), ('rejected', '🚫 Esito operazione: rifiutato'), ('uncertain', '⚠️ Esito operazione: incerto')):
             with self.subTest(status=status), patch('boto3.client') as dynamodb, \
                     patch('lambda_function.bot_store.BotStore') as factory, \
                     patch.object(telegram_worker.requests, 'Session'), \
@@ -160,7 +160,7 @@ class TelegramHandlerTests(unittest.TestCase):
                 self.assertEqual(telegram_worker.lambda_handler({'job_id': 'job'}, None), result)
                 dynamodb.assert_called_once_with('dynamodb')
                 factory.assert_called_once_with(dynamodb.return_value, 'jobs')
-                self.assertEqual(post.call_args.kwargs['json'], {'chat_id': 'chat', 'text': f'Esito operazione: {label}'})
+                self.assertEqual(post.call_args.kwargs['json'], {'chat_id': 'chat', 'text': label})
 
     def test_notification_failure_or_missing_configuration_does_not_change_result(self):
         for missing in (None, 'TELEGRAM_BOT_TOKEN', 'TELEGRAM_CHAT_ID'):
@@ -230,7 +230,7 @@ class TelegramReadHandlerTests(unittest.TestCase):
                     patch.object(telegram_worker.requests, 'post') as post:
                 post.return_value.json.return_value = {'ok': True}
                 self.assertEqual(telegram_worker.lambda_handler({'read': request, 'chat_id': '123'}, None), {'status': 'error'})
-                self.assertEqual(post.call_args.kwargs['json']['text'], 'Impossibile recuperare i dati richiesti.')
+                self.assertEqual(post.call_args.kwargs['json']['text'], '😕 Impossibile recuperare i dati richiesti.')
                 session.assert_not_called()
         with patch.object(telegram_worker, 'read_action', side_effect=RuntimeError('token-secret')), \
                 patch.object(telegram_worker.requests, 'post') as post:
@@ -277,7 +277,7 @@ class TelegramReadHandlerTests(unittest.TestCase):
             for ui, request in cases:
                 with self.subTest(ui=ui):
                     self.assertEqual(telegram_worker.lambda_handler({'read': request, 'chat_id': '123', 'ui': ui}, None), {'status': 'error'})
-                    self.assertEqual(post.call_args.kwargs['json']['text'], 'Impossibile recuperare i dati richiesti.')
+                    self.assertEqual(post.call_args.kwargs['json']['text'], '😕 Impossibile recuperare i dati richiesti.')
                     self.assertNotIn('reply_markup', post.call_args.kwargs['json'])
             render.assert_not_called()
 
@@ -291,7 +291,7 @@ class TelegramReadHandlerTests(unittest.TestCase):
             post.return_value.json.return_value = {'ok': True}
             self.assertEqual(telegram_worker.lambda_handler(event, None), {'status': 'error'})
             render.assert_called_once_with(ui, {'bookings': []}, '123')
-            self.assertEqual(post.call_args.kwargs['json']['text'], 'Impossibile recuperare i dati richiesti.')
+            self.assertEqual(post.call_args.kwargs['json']['text'], '😕 Impossibile recuperare i dati richiesti.')
 
     def test_unauthorized_ui_never_reads_or_renders(self):
         with patch.object(telegram_worker, 'read_action') as read, patch('lambda_function.telegram_bot.render_ui') as render:

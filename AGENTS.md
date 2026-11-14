@@ -5,6 +5,7 @@
 - `README.md` è la guida per configurazione, uso, notifiche, deploy e pianificazione.
 - `docs/index.md` è l'indice della knowledge base (architettura del bot AWS, costi, procedure di deploy, ADR): parti da lì e segui la progressive disclosure. Ogni documento ha frontmatter con `status` e `last-verified`; niente em-dash.
 - `docs/superpowers/plans/` contiene i piani e i limiti di implementazione; verificare lo stato attuale nel codice prima di considerarli completati.
+- `.claude/skills/gymbooking/SKILL.md` è la skill Claude per gestire il portale con richieste HTTP dirette (senza Lambda); `tests/test_skill.py` la mantiene allineata a `sportrick.py`: aggiornarla se cambiano endpoint o campi.
 - Le informazioni sulle risorse AWS nel README sono uno snapshot: verificare lo stato reale prima di operare.
 
 ## Progetto

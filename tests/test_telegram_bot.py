@@ -655,7 +655,7 @@ class TelegramBotTests(unittest.TestCase):
         self.assertEqual(len(keyboard), 2)
         text, keyboard = day(limit + 1)
         self.assertIn('/book', text)
-        self.assertEqual(keyboard, [[{'text': 'Indietro', 'callback_data': 'fa:' + '9' * (limit + 1)}]])
+        self.assertEqual(keyboard, [[{'text': '⬅️ Indietro', 'callback_data': 'fa:' + '9' * (limit + 1)}]])
         self.assertEqual(limit, 34)
 
 
