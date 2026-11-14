@@ -11,6 +11,12 @@ else:
     from ssm_config import get_secret
 
 
+def outcome_text(result):
+    status = result.get('status') if isinstance(result, dict) else None
+    emoji, label = {'confirmed': ('✅', 'confermato'), 'rejected': ('🚫', 'rifiutato')}.get(status, ('⚠️', 'incerto'))
+    return f'{emoji} Esito operazione: {label}'
+
+
 def read_action(event):
     if not isinstance(event, dict):
         raise ValueError('Evento non valido')
@@ -116,7 +122,7 @@ def lambda_handler(event, context):
                 text = json.dumps(result, ensure_ascii=False, indent=2)
             status = 'completed'
         except Exception:
-            text = 'Impossibile recuperare i dati richiesti.'
+            text = '😕 Impossibile recuperare i dati richiesti.'
             keyboard = None
             status = 'error'
         try:
@@ -157,10 +163,9 @@ def lambda_handler(event, context):
         token = None
     chat_id = os.environ.get('TELEGRAM_CHAT_ID')
     if token and chat_id:
-        label = {'confirmed': 'confermato', 'rejected': 'rifiutato'}.get(result.get('status'), 'incerto')
         try:
             response = requests.post(f'https://api.telegram.org/bot{token}/sendMessage',
-                                     json={'chat_id': chat_id, 'text': f'Esito operazione: {label}'}, timeout=15)
+                                     json={'chat_id': chat_id, 'text': outcome_text(result)}, timeout=15)
             response.raise_for_status()
         except Exception:
             pass

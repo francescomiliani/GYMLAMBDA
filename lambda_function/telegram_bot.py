@@ -27,7 +27,7 @@ else:
     from ssm_config import get_secret
 
 
-HELP = ('Comandi: /bookings, /activities, /schedule ID DATA, '
+HELP = ('📖 Comandi: /bookings, /activities, /schedule ID DATA, '
         '/book ATTIVITA DATA APPUNTAMENTO, /cancel ID, '
         '/waitlist_join ATTIVITA DATA APPUNTAMENTO, /waitlist_leave ID, '
         '/waitlist_confirm ID, /automation, /weekly GIORNI HH:MM, /disable. '
@@ -103,7 +103,7 @@ def _format_read(action, result):
     items = result[action]
     if not isinstance(items, list):
         raise ValueError('Risultato non valido')
-    titles = {'bookings': 'Impegni', 'activities': 'Attività', 'schedule': 'Calendario'}
+    titles = {'bookings': '📅 Impegni', 'activities': '🏋️ Attività', 'schedule': '🗓️ Calendario'}
     if not items:
         return titles[action] + ': nessun risultato.'
     sections = []
@@ -159,10 +159,10 @@ def _handle_message(message, token, owner, update_id=None):
         if type(update_id) is not int or update_id < 0:
             raise ValueError('Update ID non valido')
     if command in ('/start', '/help'):
-        _send(token, chat_id, HELP, [[{'text': 'Impegni', 'callback_data': 'read:bookings'},
-                                      {'text': 'Attività', 'callback_data': 'read:activities'}],
-                                     [{'text': 'Automazione', 'callback_data': 'menu:automation'},
-                                      {'text': 'Aiuto', 'callback_data': 'menu:help'}]])
+        _send(token, chat_id, HELP, [[{'text': '📅 Impegni', 'callback_data': 'read:bookings'},
+                                      {'text': '🏋️ Attività', 'callback_data': 'read:activities'}],
+                                     [{'text': '⚙️ Automazione', 'callback_data': 'menu:automation'},
+                                      {'text': '❓ Aiuto', 'callback_data': 'menu:help'}]])
     elif command in ('/bookings', '/activities', '/schedule'):
         action = command[1:]
         event = {'action': action}
@@ -178,7 +178,7 @@ def _handle_message(message, token, owner, update_id=None):
         _run_ui(token, chat_id, owner, ui)
     elif command == '/automation':
         snapshot = _scheduler().get_schedule()
-        _send(token, chat_id, 'Stato: {}\nProgramma: {}\nFuso: {}'.format(
+        _send(token, chat_id, '⚙️ Stato: {}\n🗓️ Programma: {}\n🌍 Fuso: {}'.format(
             snapshot.get('State'), snapshot.get('ScheduleExpression'), snapshot.get('ScheduleExpressionTimezone')))
     elif command in ('/weekly', '/disable'):
         payload = {'action': command[1:]}
@@ -229,10 +229,10 @@ def _confirmation_message(owner, payload, update_id, store=None, summary=None, e
                         for key, label in labels.items() if key in payload)
     if summary:
         details = summary + '\n' + details
-    return ('Confermi: ' + names[payload['action']] + '?\n' + details +
-            '\nVerifica le conseguenze prima di procedere.',
-            [[{'text': 'Conferma', 'callback_data': confirmation},
-              {'text': 'Annulla', 'callback_data': 'cancel:' + confirmation}]])
+    return ('🤔 Confermi: ' + names[payload['action']] + '?\n' + details +
+            '\n⚠️ Verifica le conseguenze prima di procedere.',
+            [[{'text': '✅ Conferma', 'callback_data': confirmation},
+              {'text': '❌ Annulla', 'callback_data': 'cancel:' + confirmation}]])
 
 
 TIMEZONE = 'Europe/Rome'
@@ -302,7 +302,7 @@ def _booking_actions(item):
 
 
 BOOKING_CALLBACKS = {'cancel': 'bc', 'waitlist_leave': 'bw', 'waitlist_confirm': 'bm'}
-BOOKING_LABELS = {'cancel': 'Cancella', 'waitlist_leave': 'Esci dalla lista', 'waitlist_confirm': 'Conferma da lista'}
+BOOKING_LABELS = {'cancel': '🗑️ Cancella', 'waitlist_leave': '🚪 Esci dalla lista', 'waitlist_confirm': '✅ Conferma da lista'}
 
 
 def _booking_summary(item):
@@ -315,7 +315,7 @@ def _read_keyboard(action, items, sid=None):
         for item in items:
             activity_id = item.get('id')
             if isinstance(activity_id, str) and activity_id.isascii() and activity_id.isdigit():
-                buttons.append(_button('Prenota: ' + str(item.get('name') or activity_id), 'fa:' + activity_id))
+                buttons.append(_button('🏋️ Prenota: ' + str(item.get('name') or activity_id), 'fa:' + activity_id))
     elif action == 'bookings':
         for item in items:
             for booking_action in _booking_actions(item):
@@ -390,8 +390,8 @@ def _selection_id(owner, sid, base_callback):
 
 
 SELECTION_ID_PATTERN = re.compile(r'flow-[0-9a-f]{40}')
-ASYNC_ACK = 'Sto recuperando i dati dal portale: ti scrivo appena sono pronti.'
-READ_ERROR = 'Impossibile recuperare i dati richiesti.'
+ASYNC_ACK = '⏳ Sto recuperando i dati dal portale: ti scrivo appena sono pronti.'
+READ_ERROR = '😕 Impossibile recuperare i dati richiesti.'
 
 
 def _async_reads():
@@ -453,22 +453,22 @@ def _day_view(ui, slots):
         action = _slot_action(slot)
         when = f'{slot.get("TimeStart", "?")} {slot.get("EventName", "")}'.strip() if isinstance(slot, dict) else '?'
         if action == 'book':
-            lines.append(f'{when}: prenotabile')
-            buttons.append(_button(f'Prenota {when}', 'gs:{}:{}:{}:{}'.format(
+            lines.append(f'🟢 {when}: prenotabile')
+            buttons.append(_button(f'🟢 Prenota {when}', 'gs:{}:{}:{}:{}'.format(
                 _pack_id(activity_id), compact, _pack_id(slot['AppointmentId']), sid)))
         elif action == 'waitlist_join':
-            lines.append(f'{when}: completa, lista d’attesa disponibile')
-            buttons.append(_button(f'Lista d’attesa {when}', 'gw:{}:{}:{}:{}'.format(
+            lines.append(f'🔴 {when}: completa, lista d’attesa disponibile')
+            buttons.append(_button(f'⏳ Lista d’attesa {when}', 'gw:{}:{}:{}:{}'.format(
                 _pack_id(activity_id), compact, _pack_id(slot['AppointmentId']), sid)))
         else:
-            lines.append(f'{when}: non prenotabile')
-    title = f'{WEEKDAYS[day.weekday()]} {day.strftime("%d/%m/%Y")}'
+            lines.append(f'⚪ {when}: non prenotabile')
+    title = f'📆 {WEEKDAYS[day.weekday()]} {day.strftime("%d/%m/%Y")}'
     text = title + (':\n' + '\n'.join(lines) if lines else ': nessuno slot.')
     if any(b is None for b in buttons[:BUTTON_LIMIT]):
         text += '\nAlcuni identificativi sono troppo lunghi per un pulsante: usa /book o /waitlist_join.'
     elif len([b for b in buttons if b]) > BUTTON_LIMIT:
         text += f'\nMostrati solo i primi {BUTTON_LIMIT} pulsanti.'
-    return text, _rows(buttons[:BUTTON_LIMIT]) + [[{'text': 'Indietro', 'callback_data': 'fa:' + activity_id}]]
+    return text, _rows(buttons[:BUTTON_LIMIT]) + [[{'text': '⬅️ Indietro', 'callback_data': 'fa:' + activity_id}]]
 
 
 def render_ui(ui, result, owner, store=None):
@@ -498,14 +498,14 @@ def render_ui(ui, result, owner, store=None):
         slot = next((s for s in result['schedule']
                      if isinstance(s, dict) and s.get('AppointmentId') == appointment_id), None)
         if action not in ('book', 'waitlist_join') or _slot_action(slot) != action:
-            return 'Slot non più disponibile per questa operazione. Riapri la scelta del giorno.', None
+            return '😕 Slot non più disponibile per questa operazione. Riapri la scelta del giorno.', None
         payload = {'action': action, 'activity_id': activity_id, 'date': date, 'appointment_id': appointment_id}
         summary = f'{slot.get("EventName", "")} {slot.get("TimeStart", "")}'.strip()
     elif kind == 'booking':
         action, booking_id = ui.get('action'), require_id(ui.get('booking_id'))
         item = next((b for b in result['bookings'] if isinstance(b, dict) and b.get('id') == booking_id), None)
         if action not in _booking_actions(item):
-            return 'Operazione non consentita dal portale per questo impegno. Aggiorna /bookings.', None
+            return '🚫 Operazione non consentita dal portale per questo impegno. Aggiorna /bookings.', None
         payload = {'action': action, 'booking_id': booking_id}
         summary = _booking_summary(item)
     else:
@@ -528,15 +528,15 @@ def _flow_callback(data, token, chat_id, owner, update_id=None):
     parts = data.split(':')
     if parts[0] == 'fa' and len(parts) == 2:
         activity_id = require_id(parts[1])
-        buttons = [_button(f'{WEEKDAYS[d.weekday()]} {d.strftime("%d/%m")}',
+        buttons = [_button(f'📆 {WEEKDAYS[d.weekday()]} {d.strftime("%d/%m")}',
                            f'fd:{activity_id}:{d.strftime("%Y%m%d")}') for d in _allowed_dates()]
-        keyboard = _rows(buttons, 2) + [[{'text': 'Indietro', 'callback_data': 'read:activities'}]]
-        _send(token, chat_id, f'Attività {activity_id}: scegli il giorno ({TIMEZONE}).', keyboard)
+        keyboard = _rows(buttons, 2) + [[{'text': '⬅️ Indietro', 'callback_data': 'read:activities'}]]
+        _send(token, chat_id, f'🏋️ Attività {activity_id}: scegli il giorno ({TIMEZONE}).', keyboard)
         return True
     ui = _parse_ui(data, owner, update_id)
     if ui is None:
         if parts[0] in ('fd', 'fs', 'fw', 'gs', 'gw', 'bc', 'bw', 'bm'):
-            _send(token, chat_id, 'Schermata obsoleta: riaprila dal menu. Nessuna operazione eseguita.')
+            _send(token, chat_id, '🕰️ Schermata obsoleta: riaprila dal menu. Nessuna operazione eseguita.')
             return True
         return False
     _run_ui(token, chat_id, owner, ui)
@@ -565,7 +565,7 @@ def _handle_callback(update, callback, token, owner):
         if not confirmation:
             raise ValueError('Callback non valida')
         cancelled = _cancel_confirmation(_store(), confirmation, owner)
-        _send(token, chat_id, 'Conferma annullata.' if cancelled else 'Conferma non disponibile: già annullata o utilizzata.')
+        _send(token, chat_id, '🚫 Conferma annullata.' if cancelled else '🤷 Conferma non disponibile: già annullata o utilizzata.')
         return
     if isinstance(data, str) and _flow_callback(data, token, chat_id, owner, update.get('update_id')):
         return
@@ -575,24 +575,24 @@ def _handle_callback(update, callback, token, owner):
     try:
         job = store.consume_confirmation(data, owner, update['update_id'])
     except StoreConflict:
-        _send(token, chat_id, 'Conferma non valida o scaduta.')
+        _send(token, chat_id, '⌛ Conferma non valida o scaduta.')
         return
     if not store.should_dispatch(job):
         if job and job.get('status') == 'running':
-            _send(token, chat_id, 'Operazione in corso o esito incerto; verifica impegni.')
+            _send(token, chat_id, '⏳ Operazione in corso o esito incerto; verifica impegni.')
             return
         result = job.get('result') if job else None
-        _send(token, chat_id, 'Operazione già ricevuta. Risultato: ' + json.dumps(result, ensure_ascii=False, default=str))
+        _send(token, chat_id, 'ℹ️ Operazione già ricevuta. Risultato: ' + json.dumps(result, ensure_ascii=False, default=str))
         return
     action = job.get('payload', {}).get('action')
     if action in MUTATIONS:
         _dispatch(data)
-        _send(token, chat_id, 'Operazione accettata dal worker. Verifica gli impegni per conoscere l’esito.')
+        _send(token, chat_id, '📨 Operazione accettata dal worker. Verifica gli impegni per conoscere l’esito.')
     elif action in ('weekly', 'disable'):
         try:
             job = store.claim_job(data)
         except StoreConflict:
-            _send(token, chat_id, 'Operazione già ricevuta.')
+            _send(token, chat_id, 'ℹ️ Operazione già ricevuta.')
             return
         try:
             payload = job['payload']
@@ -610,11 +610,11 @@ def _handle_callback(update, callback, token, owner):
                 store.finish_job(data, 'uncertain', {'status': 'uncertain'})
             except Exception:
                 pass
-            _send(token, chat_id, 'Esito incerto: verificare la programmazione prima di riprovare.')
+            _send(token, chat_id, '⚠️ Esito incerto: verificare la programmazione prima di riprovare.')
         else:
-            _send(token, chat_id, 'Programmazione aggiornata.')
+            _send(token, chat_id, '✅ Programmazione aggiornata.')
     else:
-        _send(token, chat_id, 'Operazione non riconosciuta.')
+        _send(token, chat_id, '❓ Operazione non riconosciuta.')
 
 
 def lambda_handler(event, context):

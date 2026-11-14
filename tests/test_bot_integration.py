@@ -149,7 +149,7 @@ class BotIntegrationTests(unittest.TestCase):
         self.assertEqual(self.queue, [{'job_id': token}])
         self.assertEqual(telegram_worker.lambda_handler(self.queue[0], None), {'status': 'confirmed'})
         self.client.book.assert_called_once_with('10', '2026-11-20', '20')
-        self.assertTrue(any(payload.get('text') == 'Esito operazione: confermato'
+        self.assertTrue(any(payload.get('text') == '✅ Esito operazione: confermato'
                             for _, payload in self.messages))
         self.assertEqual(self.callback(token)['statusCode'], 200)
         self.assertEqual(self.callback(token, update_id=3)['statusCode'], 200)
@@ -189,7 +189,7 @@ class BotIntegrationTests(unittest.TestCase):
         job = self.store.get_job(token)
         self.assertEqual(job['status'], 'uncertain')
         self.assertEqual(job['result'], {'status': 'uncertain'})
-        self.assertTrue(any(payload.get('text') == 'Esito operazione: incerto'
+        self.assertTrue(any(payload.get('text') == '⚠️ Esito operazione: incerto'
                             for _, payload in self.messages))
         self.callback(token)
         self.assertEqual(len(self.queue), 1)

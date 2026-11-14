@@ -106,15 +106,14 @@ class LocalBot:
         if any(json.loads(row[0]).get('status') in ('running', 'uncertain') for row in rows):
             LOG.warning('Operazioni precedenti con esito incerto: verifica gli impegni')
             try:
-                telegram_bot._send(self.token, self.chat, 'Operazioni precedenti con esito incerto: verifica gli impegni.')
+                telegram_bot._send(self.token, self.chat, '⚠️ Operazioni precedenti con esito incerto: verifica gli impegni.')
             except telegram_bot.TelegramError:
                 LOG.warning('Avviso Telegram non accettato')
 
     def dispatch(self, job_id):
         result = telegram_worker.run_job(job_id, self.store)
-        label = {'confirmed': 'confermato', 'rejected': 'rifiutato'}.get(result.get('status'), 'incerto: verifica gli impegni')
         try:
-            telegram_bot._send(self.token, self.chat, 'Esito operazione: ' + label)
+            telegram_bot._send(self.token, self.chat, telegram_worker.outcome_text(result))
         except telegram_bot.TelegramError:
             LOG.warning('Notifica Telegram non accettata; esito salvato nel database')
 
@@ -143,8 +142,8 @@ class LocalBot:
             if previous:
                 payload = previous['payload']
             token = self.store.create_confirmation_once(owner, payload, int(time.time()) + 300, str(update['update_id']))
-            telegram_bot._send(self.token, self.chat, 'Confermi l’attivazione della programmazione?',
-                               [[{'text': 'Conferma', 'callback_data': token}, {'text': 'Annulla', 'callback_data': 'cancel:' + token}]])
+            telegram_bot._send(self.token, self.chat, '🤔 Confermi l’attivazione della programmazione?',
+                               [[{'text': '✅ Conferma', 'callback_data': token}, {'text': '❌ Annulla', 'callback_data': 'cancel:' + token}]])
         else:
             telegram_bot._handle_message(message, self.token, owner, update['update_id'])
 
@@ -156,7 +155,7 @@ class LocalBot:
         try:
             job = self.store.consume_confirmation(callback['data'], owner, update['update_id'])
             if not self.store.should_dispatch(job):
-                telegram_bot._send(self.token, self.chat, 'Operazione già ricevuta; verifica la programmazione.')
+                telegram_bot._send(self.token, self.chat, 'ℹ️ Operazione già ricevuta; verifica la programmazione.')
                 return
             self.store.claim_job(callback['data'])
             snapshot = self.scheduler.get_schedule()
@@ -165,16 +164,16 @@ class LocalBot:
             self.scheduler.enable(snapshot)
             self.store.finish_job(callback['data'], 'completed', {'status': 'confirmed'})
         except StoreConflict:
-            telegram_bot._send(self.token, self.chat, 'Conferma non valida o scaduta.')
+            telegram_bot._send(self.token, self.chat, '⌛ Conferma non valida o scaduta.')
             return
         except Exception:
             try:
                 self.store.finish_job(callback['data'], 'uncertain', {'status': 'uncertain'})
             except Exception:
                 pass
-            telegram_bot._send(self.token, self.chat, 'Esito incerto: verifica la programmazione.')
+            telegram_bot._send(self.token, self.chat, '⚠️ Esito incerto: verifica la programmazione.')
             return
-        telegram_bot._send(self.token, self.chat, 'Programmazione attivata.')
+        telegram_bot._send(self.token, self.chat, '✅ Programmazione attivata.')
 
     def run_scheduled(self, now):
         if not self.scheduler.reserve_due(now, self.started):
@@ -189,7 +188,7 @@ class LocalBot:
         with self.store.db:
             self.store.put(key, {'status': status, 'date': date})
         try:
-            text = 'Prenotazione programmata confermata.' if status == 'confirmed' else 'Esito prenotazione programmata incerto: verifica gli impegni.'
+            text = '✅ Prenotazione programmata confermata.' if status == 'confirmed' else '⚠️ Esito prenotazione programmata incerto: verifica gli impegni.'
             telegram_bot._send(self.token, self.chat, text)
         except telegram_bot.TelegramError:
             LOG.warning('Notifica Telegram non accettata; esito salvato nel database')
