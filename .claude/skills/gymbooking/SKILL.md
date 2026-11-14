@@ -33,7 +33,7 @@ Usare lo scratchpad per il cookie jar e rimuoverlo a fine lavoro.
 ```bash
 BASE=https://ecomm.sportrick.com/replywellnessTO
 CJ=$(umask 077; mktemp)    # cookie jar; rm -f "$CJ" alla fine
-CRED=lambda_function/credentials.json   # chiavi UserName, Password (file ignorato da Git)
+CRED=${GYM_CRED:-$HOME/personal-projects/GYMLAMBDA/lambda_function/credentials.json}   # chiavi UserName, Password (file ignorato da Git)
 ```
 
 ### Login
