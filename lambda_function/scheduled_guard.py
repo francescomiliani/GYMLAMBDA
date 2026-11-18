@@ -6,9 +6,10 @@ import re
 from zoneinfo import ZoneInfo
 
 if __package__:
-    from . import app
+    from . import app, timetable
 else:
     import app
+    import timetable
 
 UTC = datetime.timezone.utc
 MAX_DELAY = datetime.timedelta(minutes=5)
@@ -52,6 +53,18 @@ def lambda_handler(event, context):
     from botocore.config import Config
     client = boto3.client('dynamodb', config=Config(connect_timeout=2, read_timeout=3,
                                                     retries={'total_max_attempts': 1}))
+    # Preferenze e salti si valutano prima del claim: un'occorrenza saltata non consuma nulla.
+    # Un errore di lettura interrompe qui, senza prenotare (meglio una prenotazione mancata).
+    if __package__:
+        from .bot_store import BotStore
+    else:
+        from bot_store import BotStore
+    state = BotStore(client, table)
+    if (state.get_state('skip#' + date) or {}).get('skipped'):
+        return {'status': 'skipped', 'reason': 'date skipped'}
+    times = timetable.resolve_times(state.get_state('prefs'), date, time)
+    if not times:
+        return {'status': 'skipped', 'reason': 'no preference for this weekday'}
     try:
         client.put_item(TableName=table, Item={
             'pk': {'S': key}, 'status': {'S': 'claimed'}, 'started': {'N': str(int(now.timestamp()))},
@@ -70,13 +83,25 @@ def lambda_handler(event, context):
                            ExpressionAttributeNames={'#s': 'status'},
                            ExpressionAttributeValues={':s': {'S': status}})
 
+    def last_run(status):
+        try:  # solo per /status: non deve mai influire sull'esito
+            state.put_state('last_run', {'at': now.astimezone(ZoneInfo('Europe/Rome')).strftime('%d/%m %H:%M'),
+                                         'date': date, 'status': status})
+        except Exception:
+            pass
+
+    event = {'date': date, 'time': times[0]}
+    if len(times) > 1:
+        event['fallback_times'] = times[1:]
     try:
-        result = app.lambda_handler({'date': date, 'time': time}, context)
+        result = app.lambda_handler(event, context)
     except Exception:
         try:
             record('uncertain')
         except Exception:
             pass
+        last_run('uncertain')
         raise
     record('completed')
+    last_run('completed')
     return result

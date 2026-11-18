@@ -64,7 +64,7 @@ Gli aggiornamenti ancora presenti su Telegram potranno essere elaborati dal proc
   --database "$HOME/.local/share/gymbooking/bot.sqlite3"
 ```
 
-Un secondo processo sullo stesso database viene rifiutato. Aprire la chat privata e usare `/start`. `/automation` mostra stato e orario; `/weekly MON,WED 08:30` imposta giorni e ora nel fuso Europe/Rome, con conferma, quando la pianificazione è disattivata. `/enable` attiva e `/disable` sospende, entrambi con conferma. Per cambiare l'ora: disattivare, modificare e riattivare. I pulsanti e i comandi per prenotazioni, cancellazioni e lista d'attesa seguono i flussi del bot esistente.
+Un secondo processo sullo stesso database viene rifiutato. Aprire la chat privata e usare `/start`. `/automation` mostra stato e orario; `/weekly MON,WED 08:30` imposta giorni e ora nel fuso Europe/Rome, con conferma, quando la pianificazione è disattivata. `/enable` attiva e `/disable` sospende, entrambi con conferma. Per cambiare l'ora: disattivare, modificare e riattivare. `/prefs`, `/skip`, `/orari` e `/status` funzionano come su AWS; la prenotazione programmata usa le preferenze (altrimenti 18:15). I pulsanti e i comandi per prenotazioni, cancellazioni e lista d'attesa seguono i flussi del bot esistente.
 
 L'esecuzione viene registrata prima della chiamata al portale; dopo un arresto o timeout non viene ripetuta automaticamente. Un avviso di esito incerto richiede di verificare `/bookings` prima di qualsiasi nuova operazione. La risposta Telegram indica accettazione della richiesta, non lettura del messaggio. Controllare anche i log se una notifica non arriva.
 

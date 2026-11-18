@@ -22,6 +22,20 @@ class LocalStoreTests(unittest.TestCase):
                 store.claim_job(token)
             store.close()
 
+class LocalStateTests(unittest.TestCase):
+    def test_state_survives_restart_and_overwrites(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'bot.db'
+            store = LocalStore(path)
+            self.assertIsNone(store.get_state('prefs'))
+            store.put_state('prefs', {'MON': []})
+            store.put_state('prefs', {'TUE': []}, purge_at=123)
+            store.close()
+            store = LocalStore(path)
+            self.assertEqual(store.get_state('prefs'), {'TUE': []})
+            store.close()
+
+
 class SchedulerTests(unittest.TestCase):
     def test_schedule_only_runs_after_start_in_matching_minute_and_once(self):
         from datetime import datetime
@@ -112,6 +126,42 @@ class LocalBotTests(unittest.TestCase):
             self.bot.run_scheduled(now)
             self.assertEqual(book.call_count, 1)
         self.assertEqual(self.store.get('scheduled#2026-11-09')['status'], 'uncertain')
+
+    def scheduled_run(self, book_result=None):
+        from datetime import datetime
+        from zoneinfo import ZoneInfo
+        from unittest.mock import patch
+        scheduler = self.bot.scheduler
+        scheduler.set_weekly_time(scheduler.get_schedule(), ['MON'], 8, 30)
+        scheduler.enable(scheduler.get_schedule())
+        rome = ZoneInfo('Europe/Rome')
+        self.bot.started = datetime(2026, 11, 9, 8, 0, tzinfo=rome)
+        with patch('lambda_function.app.book', return_value=book_result) as book, \
+             patch('lambda_function.telegram_bot._send') as send:
+            self.bot.run_scheduled(datetime(2026, 11, 9, 8, 30, tzinfo=rome))
+        return book, send
+
+    def test_scheduled_run_uses_preferences_in_priority_order(self):
+        from lambda_function import timetable
+        self.store.put_state('prefs', timetable.set_day(None, 'MON', ['07:00', '12:30']))
+        result = {'date': '2026-11-16', 'time': '12:30', 'message': 'Prenotazione confermata con successo.'}
+        book, send = self.scheduled_run(result)
+        self.assertEqual(book.call_args.args[1:], ('2026-11-16', ['07:00', '12:30']))
+        self.assertIn('ore 12:30', send.call_args.args[2])
+        self.assertEqual(self.store.get_state('last_run')['status'], 'confirmed')
+
+    def test_scheduled_run_skips_marked_date_and_days_without_preference(self):
+        from lambda_function import timetable
+        self.store.put_state('prefs', timetable.set_day(None, 'MON', ['07:00']))
+        self.store.put_state('skip#2026-11-16', {'skipped': True})
+        book, send = self.scheduled_run()
+        book.assert_not_called()
+        self.assertEqual(self.store.get('scheduled#2026-11-09')['status'], 'skipped')
+        self.assertIn('saltata', send.call_args.args[2])
+
+    def test_scheduled_run_without_preferences_keeps_legacy_default(self):
+        book, _ = self.scheduled_run({'message': 'x'})
+        self.assertEqual(book.call_args.args[1:], ('2026-11-16', ['18:15']))
 
     def test_restart_warns_about_unfinished_scheduled_run(self):
         from unittest.mock import patch

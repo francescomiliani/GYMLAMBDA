@@ -86,9 +86,9 @@ class TelegramBotTests(unittest.TestCase):
         for result in ({'ok': False, 'description': 'token'}, {}, [], {'ok': 1}):
             with self.subTest(result=result):
                 self.post.return_value.json.return_value = result
-                self.assertEqual(self.invoke(), 502)
+                self.assertEqual(self.invoke(), 200)
         self.post.return_value.json.side_effect = ValueError('token')
-        self.assertEqual(self.invoke(), 502)
+        self.assertEqual(self.invoke(), 200)
 
     def test_network_failure_is_not_exposed(self):
         self.post.side_effect = telegram_bot.requests.RequestException('token')
@@ -97,7 +97,7 @@ class TelegramBotTests(unittest.TestCase):
             'requestContext': {'http': {'method': 'POST'}},
             'body': json.dumps({'message': self.message}),
         }, None)
-        self.assertEqual(result, {'statusCode': 502, 'body': 'Request failed'})
+        self.assertEqual(result, {'statusCode': 200, 'body': 'OK'})
 
     def callback(self, data='opaque', sender=123, chat=123, update_id=1, message_id=1000):
         message = {'chat': {'id': chat, 'type': 'private'}}
@@ -135,8 +135,10 @@ class TelegramBotTests(unittest.TestCase):
             store.should_dispatch.side_effect = None
             store.should_dispatch.return_value = True
             dispatch.side_effect = RuntimeError('token')
-            self.assertEqual(self.callback(update_id=3), 502)
-            self.assertEqual(self.post.call_args.args[0].split('/')[-1], 'answerCallbackQuery')
+            self.assertEqual(self.callback(update_id=3), 200)
+            methods = [c.args[0].split('/')[-1] for c in self.post.call_args_list]
+            self.assertEqual(methods[-2:], ['answerCallbackQuery', 'sendMessage'])
+            self.assertIn('Errore temporaneo', self.post.call_args.kwargs['json']['text'])
 
     def test_post_and_body_size_limits(self):
         self.assertEqual(self.invoke(requestContext={'http': {'method': 'GET'}}), 405)
@@ -152,7 +154,7 @@ class TelegramBotTests(unittest.TestCase):
             store.consume_confirmation.return_value = {'status': 'pending', 'payload': {'action': 'book'}}
             store.should_dispatch.return_value = True
             dispatch.side_effect = [RuntimeError('secret token'), None]
-            self.assertEqual(self.callback(), 502)
+            self.assertEqual(self.callback(), 200)
             self.assertEqual(self.callback(), 200)
             self.assertEqual(dispatch.call_count, 2)
             for status in ('running', 'completed'):
@@ -233,7 +235,7 @@ class TelegramBotTests(unittest.TestCase):
         self.assertEqual(self.invoke(), 200)
         keyboard = self.post.call_args.kwargs['json']['reply_markup']['inline_keyboard']
         self.assertEqual([b['callback_data'] for row in keyboard for b in row],
-                         ['read:bookings', 'read:activities', 'menu:automation', 'menu:help'])
+                         ['read:bookings', 'read:activities', 'menu:orari', 'menu:status', 'menu:automation', 'menu:help'])
         with patch.object(telegram_bot, '_scheduler') as scheduler:
             scheduler.return_value.get_schedule.return_value = {'State': 'DISABLED'}
             self.assertEqual(self.callback('menu:automation'), 200)
@@ -280,7 +282,7 @@ class TelegramBotTests(unittest.TestCase):
             self.assertEqual(store.create_confirmation_once.call_args.args[3], '42')
             self.assertEqual(self.post.call_args.kwargs['json']['reply_markup']['inline_keyboard'][0][0]['callback_data'], 'opaque')
             self.message['text'] = '/cancel 456'
-            self.assertEqual(self.invoke(), 400)
+            self.assertEqual(self.invoke(), 200)
             self.assertEqual(len(records), 1)
 
     def test_missing_or_invalid_command_update_id_has_no_effect(self):
@@ -289,10 +291,11 @@ class TelegramBotTests(unittest.TestCase):
                 self.message['text'] = command
                 for update in ({}, {'update_id': None}, {'update_id': True}, {'update_id': -1}, {'update_id': '42'}):
                     body = json.dumps({**update, 'message': self.message})
-                    self.assertEqual(self.invoke(body=body), 400)
+                    self.assertEqual(self.invoke(body=body), 200)
             store.assert_not_called()
             scheduler.assert_not_called()
-            self.post.assert_not_called()
+            # nessun effetto, solo avvisi all'utente (200: niente blocco della coda Telegram)
+            self.assertTrue(all(c.kwargs['json']['text'].startswith('⚠️') for c in self.post.call_args_list))
 
     def test_schedule_redelivery_reuses_original_snapshot_even_after_change(self):
         with patch.object(telegram_bot, '_store') as factory, patch.object(telegram_bot, '_scheduler') as scheduler:
@@ -309,8 +312,187 @@ class TelegramBotTests(unittest.TestCase):
             self.assertEqual(store.create_confirmation_once.call_args.args[1], payload)
             self.assertEqual(scheduler.return_value.get_schedule.call_count, 1)
             self.message['text'] = '/weekly TUE 08:30'
-            self.assertEqual(self.invoke(), 400)
+            self.assertEqual(self.invoke(), 200)
             self.assertEqual(store.create_confirmation_once.call_count, 2)
+
+    # --- orari, preferenze, skip, status ----------------------------------
+    def test_orari_needs_no_network_beyond_the_reply(self):
+        self.message['text'] = '/orari'
+        self.assertEqual(self.invoke(), 200)
+        text = self.last()['text']
+        self.assertIn('Sala attrezzi', text)
+        self.assertIn('GAG', text)
+        self.assertEqual(self.post.call_count, 1)
+
+    def test_prefs_show_and_set_with_confirmation(self):
+        prefs = {'MON': [{'activity': 'gym', 'time': '07:00'}]}
+        with patch.object(telegram_bot, '_store') as factory:
+            store = factory.return_value
+            store.get_state.return_value = prefs
+            self.message['text'] = '/prefs'
+            self.assertEqual(self.invoke(), 200)
+            self.assertIn('Lunedì 07:00', self.last()['text'])
+            store.create_confirmation_once.return_value = 'opaque'
+            self.message['text'] = '/prefs mon 12:30,07:00'
+            self.assertEqual(self.invoke(), 200)
+            self.assertEqual(store.create_confirmation_once.call_args.args[1],
+                             {'action': 'prefs', 'day': 'MON', 'times': ['12:30', '07:00']})
+            self.assertIn('12:30, 07:00', self.last()['text'])
+            store.put_state.assert_not_called()  # nessuna modifica prima della conferma
+
+    def test_prefs_callback_writes_state_once_confirmed(self):
+        with patch.object(telegram_bot, '_store') as factory:
+            store = factory.return_value
+            job = {'status': 'pending', 'payload': {'action': 'prefs', 'day': 'MON', 'times': ['12:30', '07:00']}}
+            store.consume_confirmation.return_value = job
+            store.should_dispatch.return_value = True
+            store.claim_job.return_value = job
+            store.get_state.return_value = {'WED': [{'activity': 'gym', 'time': '18:15'}]}
+            self.assertEqual(self.callback('opaque'), 200)
+            key, value = store.put_state.call_args.args
+            self.assertEqual(key, 'prefs')
+            self.assertEqual([e['time'] for e in value['MON']], ['12:30', '07:00'])
+            self.assertIn('WED', value)  # gli altri giorni restano
+            store.finish_job.assert_called_once_with('opaque', 'completed', {'status': 'confirmed'})
+            self.assertIn('Preferenze aggiornate', self.last()['text'])
+
+    def test_prefs_write_failure_is_uncertain_not_retried(self):
+        with patch.object(telegram_bot, '_store') as factory:
+            store = factory.return_value
+            job = {'status': 'pending', 'payload': {'action': 'prefs', 'day': 'MON', 'times': []}}
+            store.consume_confirmation.return_value = job
+            store.should_dispatch.return_value = True
+            store.claim_job.return_value = job
+            store.get_state.return_value = None
+            store.put_state.side_effect = RuntimeError('boom')
+            self.assertEqual(self.callback('opaque'), 200)
+            store.finish_job.assert_called_once_with('opaque', 'uncertain', {'status': 'uncertain'})
+            self.assertIn('Esito incerto', self.last()['text'])
+
+    def test_skip_flow_and_validation(self):
+        with patch.object(telegram_bot, '_store') as factory:
+            store = factory.return_value
+            store.create_confirmation_once.return_value = 'opaque'
+            self.message['text'] = '/skip 2026-11-20'
+            self.assertEqual(self.invoke(), 200)
+            self.assertEqual(store.create_confirmation_once.call_args.args[1],
+                             {'action': 'skip', 'date': '2026-11-20', 'skipped': True})
+            self.assertIn('non prenotare', self.last()['text'])
+            self.message['text'] = '/skip off 2026-11-20'
+            self.assertEqual(self.invoke(), 200)
+            self.assertFalse(store.create_confirmation_once.call_args.args[1]['skipped'])
+            job = {'status': 'pending', 'payload': {'action': 'skip', 'date': '2026-11-20', 'skipped': True}}
+            store.consume_confirmation.return_value = job
+            store.should_dispatch.return_value = True
+            store.claim_job.return_value = job
+            self.assertEqual(self.callback('opaque'), 200)
+            self.assertEqual(store.put_state.call_args.args, ('skip#2026-11-20', {'skipped': True}))
+            self.assertIn('purge_at', store.put_state.call_args.kwargs)
+            calls = store.create_confirmation_once.call_count
+            for bad in ('/skip 2026-11-11', '/skip', '/skip off', '/skip 2026-13-01', '/prefs MON', '/prefs SAT 07:00',
+                        '/prefs MON 08:00', '/prefs MON 07:00 x'):
+                self.message['text'] = bad
+                with self.subTest(bad=bad):
+                    self.assertEqual(self.invoke(), 200)
+                    self.assertTrue(self.last()['text'].startswith('⚠️'))
+            self.assertEqual(store.create_confirmation_once.call_count, calls)
+
+    def test_status_summarises_schedule_prefs_last_run_and_webhook(self):
+        self.post.return_value.json.return_value = {'ok': True, 'result': {
+            'url': 'https://example', 'pending_update_count': 4,
+            'last_error_message': 'Wrong response from the webhook: 400 Bad Request', 'last_error_date': 1794993216}}
+        with patch.object(telegram_bot, '_store') as factory, patch.object(telegram_bot, '_scheduler') as scheduler:
+            scheduler.return_value.get_schedule.return_value = {
+                'State': 'ENABLED', 'ScheduleExpression': 'cron(0 7 ? * MON,WED,FRI *)'}
+            values = {'prefs': {'MON': [{'activity': 'gym', 'time': '07:00'}, {'activity': 'gym', 'time': '12:30'}]},
+                      'last_run': {'at': '16/11 07:00', 'date': '2026-11-23', 'status': 'completed'}}
+            factory.return_value.get_state.side_effect = lambda key: values.get(key)
+            self.message['text'] = '/status'
+            self.assertEqual(self.invoke(), 200)
+        text = self.post.call_args_list[-1].kwargs['json']['text']
+        for expected in ('ENABLED, prossima esecuzione', 'Lunedì 07:00 > 12:30', '16/11 07:00 completed',
+                         '4 update in coda', '400 Bad Request'):
+            self.assertIn(expected, text)
+
+    def test_status_sections_fail_independently(self):
+        with patch.object(telegram_bot, '_store', side_effect=RuntimeError('db')), \
+                patch.object(telegram_bot, '_scheduler', side_effect=RuntimeError('aws')):
+            self.post.return_value.json.return_value = {'ok': True, 'result': {'url': ''}}
+            self.message['text'] = '/status'
+            self.assertEqual(self.invoke(), 200)
+        text = self.last()['text']
+        self.assertIn('Automazione: non disponibile', text)
+        self.assertIn('Preferenze: non disponibile', text)
+        self.assertIn('polling locale', text)
+
+    def test_next_run_from_cron_and_local_fields(self):
+        zone = telegram_bot.ZoneInfo('Europe/Rome')
+        now = datetime.datetime(2026, 11, 18, 10, 0, tzinfo=zone)  # mercoledì
+        cron = {'State': 'ENABLED', 'ScheduleExpression': 'cron(0 7 ? * MON,WED,FRI *)'}
+        self.assertEqual(telegram_bot._next_run(cron, now), 'Ven 20/11 07:00')
+        self.assertEqual(telegram_bot._next_run({'State': 'ENABLED', 'days': ['WED'], 'hour': 18, 'minute': 15}, now),
+                         'Mer 18/11 18:15')
+        self.assertIn('non attiva', telegram_bot._next_run({'State': 'DISABLED'}, now))
+        self.assertEqual(telegram_bot._next_run({'State': 'ENABLED', 'ScheduleExpression': 'rate(1 day)'}, now), 'non calcolabile')
+
+    def test_prefs_and_skip_callbacks_failure_paths(self):
+        for payload, state_call in (({'action': 'prefs', 'day': 'MON', 'times': ['07:00']}, 'put_state'),
+                                    ({'action': 'skip', 'date': '2026-11-20', 'skipped': True}, 'put_state')):
+            with self.subTest(action=payload['action']), patch.object(telegram_bot, '_store') as factory:
+                store = factory.return_value
+                job = {'status': 'pending', 'payload': payload}
+                store.consume_confirmation.return_value = job
+                store.should_dispatch.return_value = True
+                store.get_state.return_value = None
+                # claim già preso da un'altra consegna: nessuna scrittura
+                store.claim_job.side_effect = telegram_bot.StoreConflict('claimed')
+                self.assertEqual(self.callback('opaque'), 200)
+                self.assertIn('già ricevuta', self.last()['text'])
+                store.put_state.assert_not_called()
+                # scrittura fallita e anche finish_job fallisce: l'esito resta incerto, 200, nessun ritentativo
+                store.claim_job.side_effect = None
+                store.claim_job.return_value = job
+                getattr(store, state_call).side_effect = RuntimeError('boom')
+                store.finish_job.side_effect = RuntimeError('boom2')
+                self.assertEqual(self.callback('opaque'), 200)
+                self.assertIn('Esito incerto', self.last()['text'])
+
+    def test_orari_and_status_menu_callbacks(self):
+        self.assertEqual(self.callback('menu:orari'), 200)
+        self.assertIn('Sala attrezzi', self.last()['text'])
+        with patch.object(telegram_bot, '_store', side_effect=RuntimeError('db')), \
+                patch.object(telegram_bot, '_scheduler', side_effect=RuntimeError('aws')):
+            self.post.return_value.json.return_value = {'ok': True, 'result': {'url': ''}}
+            self.assertEqual(self.callback('menu:status'), 200)
+        self.assertIn('Stato del bot', self.last()['text'])
+
+    def test_orari_and_status_reject_extra_arguments_quietly(self):
+        for text in ('/orari x', '/status x'):
+            self.message['text'] = text
+            self.post.reset_mock()
+            self.assertEqual(self.invoke(), 200)
+            self.post.assert_not_called()
+
+    def test_next_run_with_no_matching_days_is_not_computable(self):
+        zone = telegram_bot.ZoneInfo('Europe/Rome')
+        now = datetime.datetime(2026, 11, 18, 10, 0, tzinfo=zone)
+        self.assertEqual(telegram_bot._next_run({'State': 'ENABLED', 'days': [], 'hour': 7, 'minute': 0}, now),
+                         'non calcolabile')
+
+    def test_usage_hint_is_separated_from_the_retry_text(self):
+        self.message['text'] = '/schedule 12'
+        self.assertEqual(self.invoke(), 200)
+        self.assertEqual(self.last()['text'], '⚠️ Richiesta non valida o scaduta. Uso: /schedule ID DATA. Riprova da /start.')
+        self.message['text'] = '/prefs MON'
+        self.assertEqual(self.invoke(), 200)
+        self.assertIn('/prefs MON off. Riprova', self.last()['text'])
+
+    def test_malformed_authenticated_update_never_blocks_telegram_queue(self):
+        self.message['text'] = '/schedule 12'
+        self.assertEqual(self.invoke(), 200)
+        self.assertIn('Uso: /schedule ID DATA', self.last()['text'])
+        self.post.side_effect = telegram_bot.requests.RequestException('down')  # nemmeno se l'avviso fallisce
+        self.assertEqual(self.invoke(), 200)
 
     # --- guided flow -------------------------------------------------------
     def last(self):
@@ -362,7 +544,7 @@ class TelegramBotTests(unittest.TestCase):
         self.assertEqual(data, ['fd:12:' + d for d in (
             '20261112', '20261113', '20261114', '20261115', '20261116', '20261117', '20261118')])
         self.assertTrue(all(len(d.encode()) <= 64 for d in self.data()))
-        self.assertEqual(self.callback('fa:x'), 400)
+        self.assertEqual(self.callback('fa:x'), 200)
 
     def test_slots_carry_screen_id_and_stay_within_limit(self):
         sid = self.sid(7)
@@ -372,7 +554,7 @@ class TelegramBotTests(unittest.TestCase):
             self.assertEqual(self.data(), [self.cb('s', '12', '20261113', '34', sid), self.cb('w', '12', '20261113', '35', sid), 'fa:12'])
             self.assertTrue(all(len(d.encode()) <= 64 for d in self.data()))
             for bad in ('fd:12:20261119', 'fd:12:20261111', 'fd:12:2026-11-13', 'fd:12:20261313'):
-                self.assertEqual(self.callback(bad), 400)
+                self.assertEqual(self.callback(bad), 200)
             self.assertEqual(read.call_count, 1)
             # the id strings are preserved verbatim, including leading zeros and long values
             self.assertEqual(self.callback('fd:0012:20261113', update_id=8), 200)
@@ -386,7 +568,7 @@ class TelegramBotTests(unittest.TestCase):
                 if update_id is not None:
                     body['update_id'] = update_id
                 with self.subTest(update_id=update_id):
-                    self.assertEqual(self.invoke(body=json.dumps(body)), 400)
+                    self.assertEqual(self.invoke(body=json.dumps(body)), 200)
             read.assert_not_called()
 
     def test_slot_identity_is_per_screen_not_per_message_or_time(self):
@@ -491,8 +673,8 @@ class TelegramBotTests(unittest.TestCase):
         with patch.object(telegram_bot.telegram_worker, 'read_action') as read:
             self.assertEqual(self.callback('fa:12', sender=124), 403)
             self.assertEqual(self.callback(f'bc:1:{sid}', chat=124), 403)
-            self.assertEqual(self.callback(f'bc:1x:{sid}'), 400)
-            self.assertEqual(self.callback(f'gs:{telegram_bot._pack_id("1")}:20261113:!:{sid}'), 400)
+            self.assertEqual(self.callback(f'bc:1x:{sid}'), 200)
+            self.assertEqual(self.callback(f'gs:{telegram_bot._pack_id("1")}:20261113:!:{sid}'), 200)
             read.assert_not_called()
 
     def test_callback_limit_helper(self):
@@ -529,7 +711,7 @@ class TelegramBotTests(unittest.TestCase):
             self.assertEqual(schedule['ui']['kind'], 'schedule')
             self.assertIn('recuperando', self.last()['text'])
             client.return_value.invoke.return_value = {'StatusCode': 500}
-            self.assertEqual(self.callback('read:activities'), 502)
+            self.assertEqual(self.callback('read:activities'), 200)
         with patch.dict(os.environ, {'BOT_ASYNC_READS': '1'}), \
                 patch.object(telegram_bot.telegram_worker, 'read_action', return_value={'activities': []}) as read:
             self.assertEqual(self.callback('read:activities'), 200)  # no worker configured: stays synchronous

@@ -67,7 +67,7 @@ Non impostare `ReservedConcurrentExecutions`: il limite dell'account lo rifiuta.
 ## 5. Verifica
 
 - POST senza secret alla URL: 403. GET: 405.
-- Su Telegram: `/start`, poi `/bookings` e `/automation` (sola lettura).
+- Su Telegram: `/start`, poi `/bookings`, `/automation`, `/orari` e `/status` (sola lettura). Dopo un deploy controllare con `getWebhookInfo` che `pending_update_count` sia 0 e che non ci sia un `last_error` recente.
 - Log in CloudWatch `/aws/lambda/gymbot-telegram-*`.
 - Schedule ancora `DISABLED`.
 

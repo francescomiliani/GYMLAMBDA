@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 
 import requests
 
-from . import app, telegram_bot, telegram_worker
+from . import app, telegram_bot, telegram_worker, timetable
 from .bot_scheduler import fingerprint
 from .local_store import LocalStore, StoreConflict
 
@@ -179,16 +179,27 @@ class LocalBot:
         if not self.scheduler.reserve_due(now, self.started):
             return
         key = 'scheduled#' + now.date().isoformat()
+        date = (now.date() + datetime.timedelta(days=7)).isoformat()
+        booked = None
         try:
-            date = (now.date() + datetime.timedelta(days=7)).isoformat()
-            result = app.book({'UserName': self.config['sportrick_username'], 'Password': self.config['sportrick_password']}, date, ['18:15'])
-            status = 'confirmed' if isinstance(result, dict) and result.get('message') == 'Prenotazione confermata con successo.' else 'uncertain'
+            times = [] if (self.store.get_state('skip#' + date) or {}).get('skipped') else \
+                timetable.resolve_times(self.store.get_state('prefs'), date, '18:15')
+            if not times:
+                status = 'skipped'
+            else:
+                result = app.book({'UserName': self.config['sportrick_username'], 'Password': self.config['sportrick_password']}, date, times)
+                confirmed = isinstance(result, dict) and result.get('message') == 'Prenotazione confermata con successo.'
+                status = 'confirmed' if confirmed else 'uncertain'
+                booked = result.get('time') if confirmed else None
         except Exception:
             status = 'uncertain'
         with self.store.db:
             self.store.put(key, {'status': status, 'date': date})
+        self.store.put_state('last_run', {'at': now.strftime('%d/%m %H:%M'), 'date': date, 'status': status})
         try:
-            text = '✅ Prenotazione programmata confermata.' if status == 'confirmed' else '⚠️ Esito prenotazione programmata incerto: verifica gli impegni.'
+            text = {'confirmed': f'✅ Prenotazione programmata confermata: {date} ore {booked}.',
+                    'skipped': f'⏭️ Prenotazione programmata saltata per {date} (data saltata o nessuna preferenza per quel giorno).',
+                    }.get(status, '⚠️ Esito prenotazione programmata incerto: verifica gli impegni.')
             telegram_bot._send(self.token, self.chat, text)
         except telegram_bot.TelegramError:
             LOG.warning('Notifica Telegram non accettata; esito salvato nel database')

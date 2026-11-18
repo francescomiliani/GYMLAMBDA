@@ -178,6 +178,13 @@ Messaggi (stessi per entrambi i canali, corso/data/ora dall'impegno confermato):
 | `wl_join` | `⏳ Sei in lista d'attesa!` / ... / `Dita incrociate 🤞🍀` |
 | `wl_leave` | `👋 Uscito dalla lista d'attesa` / ... / `Nessun rimpianto 😌` |
 
+## Orari di riferimento
+
+Foto ufficiale: `docs/reference/orari-palestra-2026-11.png` (tabelle in `docs/reference/orari-palestra.md`,
+dati in `lambda_function/timetable.py`). Sala attrezzi lun-ven 07:00-09:00, 12:30-14:30, 18:15-20:15; sala
+corsi con orari e nomi fissi per giorno (es. lun 13:00 GAG, mar 18:30 Yoga). Usare la tabella per orientarsi
+o se il calendario non risponde; per disponibilita' e `AppointmentId` vale sempre `GetActivitySchedule`.
+
 ## Flussi tipici
 
 - **"Cosa ho prenotato?"** login, impegni, tabella (data, ora, corso, lista d'attesa).

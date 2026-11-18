@@ -37,6 +37,13 @@ class LocalStore:
     def put(self, key, value):
         self.db.execute('INSERT OR REPLACE INTO state VALUES (?, ?)', (key, json.dumps(value)))
 
+    def get_state(self, key):
+        return self.get('state#' + key)
+
+    def put_state(self, key, value, purge_at=None):
+        with self.db:
+            self.put('state#' + key, value)
+
     def get_update(self, update_id):
         return self.get('update#' + str(update_id))
 

@@ -171,7 +171,9 @@ class BotIntegrationTests(unittest.TestCase):
     def test_failed_dispatch_redelivery_only_while_pending(self):
         token = self.confirmation()
         self.fail_dispatch = True
-        self.assertEqual(self.callback(token)['statusCode'], 502)
+        # 200 (mai 5xx: bloccherebbe la coda Telegram): l'utente è avvisato e può ripremere il bottone
+        self.assertEqual(self.callback(token)['statusCode'], 200)
+        self.assertTrue(any('Errore temporaneo' in payload.get('text', '') for _, payload in self.messages))
         self.assertEqual(self.store.get_job(token)['status'], 'pending')
         self.fail_dispatch = False
         self.assertEqual(self.callback(token)['statusCode'], 200)

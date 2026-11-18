@@ -25,6 +25,7 @@ ALLOWLIST = (
     'sportrick.py',
     'telegram_bot.py',
     'telegram_worker.py',
+    'timetable.py',
 )
 IGNORED = ('__init__.py',)  # present in source, deliberately not packaged
 FORBIDDEN = ('credentials.json',)

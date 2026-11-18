@@ -46,6 +46,10 @@ prenotazioni e le azioni sulla lista d'attesa possono modificare realmente il po
 Per un esito incerto verifica gli impegni prima di riprovare. I servizi non supportati
 non sono prenotabili dal bot.
 
+Altri comandi: `/orari` (griglia sala attrezzi e corsi, da [foto in repo](docs/reference/orari-palestra.md)),
+`/prefs MON 07:00,12:30` (orari preferiti per giorno con fallback in ordine, con conferma),
+`/skip DATA` (salta una lezione) e `/status` (schedule, ultima esecuzione, coda Telegram).
+
 L'automazione può essere consultata e sospesa; giorni e ora sono modificabili solo a
 schedule disattivata. **La riattivazione dal bot è bloccata**: i retry della schedule
 esistente possono ripetere una prenotazione e la funzione non è idempotente. La

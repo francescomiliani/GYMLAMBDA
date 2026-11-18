@@ -29,6 +29,22 @@ class BuildBotPackageTests(unittest.TestCase):
         self.assertFalse((self.target / 'credentials.json').exists())
         self.assertFalse((self.target / '__init__.py').exists())
 
+    def test_allowlist_covers_every_local_import_of_packaged_modules(self):
+        import re
+        root = Path(__file__).resolve().parents[1] / 'lambda_function'
+        local = {p.stem for p in root.glob('*.py')}
+        packaged = {Path(name).stem for name in builder.ALLOWLIST if name.endswith('.py')}
+        for name in sorted(packaged):
+            text = (root / (name + '.py')).read_text()
+            imported = set(re.findall(r'^\s+(?:import|from) (\w+)', text, re.M))
+            imported |= {m for group in re.findall(r'^\s+from \. import ([\w, ]+)', text, re.M)
+                         for m in re.split(r',\s*', group)}
+            missing = (imported & local) - packaged - {name}
+            self.assertFalse(missing, f'{name}.py imports {sorted(missing)} which are not packaged')
+
+    def test_includes_timetable(self):
+        self.assertIn('timetable.py', builder.ALLOWLIST)
+
     def test_includes_ssm_config(self):
         self.assertIn('ssm_config.py', builder.ALLOWLIST)
         builder.build(self.source, self.target)

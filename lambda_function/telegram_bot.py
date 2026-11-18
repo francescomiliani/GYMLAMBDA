@@ -14,13 +14,14 @@ from zoneinfo import ZoneInfo
 import requests
 
 if __package__:
-    from . import telegram_worker
+    from . import telegram_worker, timetable
     from .bot_scheduler import BotScheduler, fingerprint
     from .store_conflict import StoreConflict
     from .sportrick import require_date, require_id
     from .ssm_config import get_secret
 else:
     import telegram_worker
+    import timetable
     from bot_scheduler import BotScheduler, fingerprint
     from store_conflict import StoreConflict
     from sportrick import require_date, require_id
@@ -30,9 +31,11 @@ else:
 HELP = ('📖 Comandi: /bookings, /activities, /schedule ID DATA, '
         '/book ATTIVITA DATA APPUNTAMENTO, /cancel ID, '
         '/waitlist_join ATTIVITA DATA APPUNTAMENTO, /waitlist_leave ID, '
-        '/waitlist_confirm ID, /automation, /weekly GIORNI HH:MM, /disable. '
+        '/waitlist_confirm ID, /automation, /weekly GIORNI HH:MM, /disable, '
+        '/orari, /prefs [GIORNO ORARI|off], /skip [off] DATA, /status. '
         'Per le azioni servono gli ID mostrati da /bookings, /activities e /schedule. '
-        'Giorni: MON,TUE,WED,THU,FRI,SAT,SUN. L’attivazione è bloccata.')
+        'Giorni: MON,TUE,WED,THU,FRI,SAT,SUN. L’attivazione è bloccata. '
+        'Esempio preferenze con fallback: /prefs MON 07:00,12:30 (prima le 7, poi le 12:30).')
 MUTATIONS = {'book', 'cancel', 'waitlist_join', 'waitlist_leave', 'waitlist_confirm'}
 MAX_BODY_BYTES = 64 * 1024
 
@@ -74,6 +77,7 @@ def _telegram(token, method, payload):
         result = response.json()
         if not isinstance(result, dict) or result.get('ok') is not True:
             raise ValueError('Invalid response')
+        return result.get('result')
     except (requests.RequestException, ValueError):
         raise TelegramError('Telegram request failed') from None
 
@@ -155,14 +159,22 @@ def _handle_message(message, token, owner, update_id=None):
         return
     command = parts[0]
     chat_id = message['chat']['id']
-    if command in ('/weekly', '/disable') or (command.startswith('/') and command[1:] in MUTATIONS):
+    if command in ('/weekly', '/disable', '/prefs', '/skip') or (command.startswith('/') and command[1:] in MUTATIONS):
         if type(update_id) is not int or update_id < 0:
             raise ValueError('Update ID non valido')
     if command in ('/start', '/help'):
         _send(token, chat_id, HELP, [[{'text': '📅 Impegni', 'callback_data': 'read:bookings'},
                                       {'text': '🏋️ Attività', 'callback_data': 'read:activities'}],
+                                     [{'text': '🗓️ Orari', 'callback_data': 'menu:orari'},
+                                      {'text': '📡 Stato', 'callback_data': 'menu:status'}],
                                      [{'text': '⚙️ Automazione', 'callback_data': 'menu:automation'},
                                       {'text': '❓ Aiuto', 'callback_data': 'menu:help'}]])
+    elif command == '/orari' and len(parts) == 1:
+        _send(token, chat_id, timetable.format_week())
+    elif command == '/status' and len(parts) == 1:
+        _send(token, chat_id, _status_text(token))
+    elif command in ('/prefs', '/skip'):
+        _prefs_or_skip(command, parts, token, chat_id, owner, update_id)
     elif command in ('/bookings', '/activities', '/schedule'):
         action = command[1:]
         event = {'action': action}
@@ -211,6 +223,86 @@ def _handle_message(message, token, owner, update_id=None):
         _confirm(token, chat_id, owner, _command(text), update_id)
 
 
+def _prefs_or_skip(command, parts, token, chat_id, owner, update_id):
+    if command == '/prefs':
+        if len(parts) == 1:
+            _send(token, chat_id, '⭐ Preferenze (giorno della lezione, prima scelta a sinistra): '
+                  + timetable.format_prefs(_store().get_state('prefs')))
+            return
+        if len(parts) != 3:
+            raise ValueError('Uso: /prefs MON 07:00,12:30 oppure /prefs MON off. ')
+        payload = {'action': 'prefs', 'day': timetable.parse_day(parts[1]), 'times': timetable.parse_times(parts[2])}
+    else:
+        skipped = not (len(parts) == 3 and parts[1] == 'off')
+        if len(parts) != (2 if skipped else 3):
+            raise ValueError('Uso: /skip YYYY-MM-DD oppure /skip off YYYY-MM-DD. ')
+        date = require_date(parts[-1])
+        if datetime.date.fromisoformat(date) < _today():
+            raise ValueError('Data nel passato')
+        payload = {'action': 'skip', 'date': date, 'skipped': skipped}
+    _confirm(token, chat_id, owner, payload, update_id)
+
+
+def _next_run(snapshot, now):
+    """Next scheduled run (Europe/Rome) from either a cron expression or the local bot's fields."""
+    if snapshot.get('State') != 'ENABLED':
+        return 'nessuna (automazione non attiva)'
+    days, hour, minute = snapshot.get('days'), snapshot.get('hour'), snapshot.get('minute')
+    if days is None:
+        match = re.fullmatch(r'cron\((\d+) (\d+) \? \* ([A-Z,]+) \*\)', str(snapshot.get('ScheduleExpression')))
+        if not match:
+            return 'non calcolabile'
+        minute, hour, days = int(match[1]), int(match[2]), match[3].split(',')
+    for offset in range(8):
+        day = now + datetime.timedelta(days=offset)
+        candidate = day.replace(hour=hour, minute=minute, second=0, microsecond=0)
+        if timetable.DAYS[day.weekday()] in days and candidate > now:
+            return f'{WEEKDAYS[candidate.weekday()]} {candidate:%d/%m %H:%M}'
+    return 'non calcolabile'
+
+
+def _status_text(token):
+    """Read-only health summary; each section fails independently so the rest stays visible."""
+    now = datetime.datetime.now(ZoneInfo(TIMEZONE))
+    lines = ['📡 Stato del bot']
+
+    def section(label, producer):
+        try:
+            lines.append(f'{label}: {producer()}')
+        except Exception:
+            lines.append(f'{label}: non disponibile')
+
+    def schedule():
+        snapshot = _scheduler().get_schedule()
+        return f'{snapshot.get("State")}, prossima esecuzione {_next_run(snapshot, now)}'
+
+    def webhook():
+        info = _telegram(token, 'getWebhookInfo', {})
+        if not info.get('url'):
+            return 'polling locale (nessun webhook)'
+        text = f'{info.get("pending_update_count", 0)} update in coda'
+        if info.get('last_error_message'):
+            when = datetime.datetime.fromtimestamp(info.get('last_error_date', 0), ZoneInfo(TIMEZONE))
+            text += f'; ultimo errore {when:%d/%m %H:%M}: {info["last_error_message"]}'
+        return text
+
+    def last_run():
+        item = _store().get_state('last_run')
+        return f'{item["at"]} {item["status"]} (lezione {item["date"]})' if item else 'nessuna esecuzione registrata'
+
+    def skips():
+        found = [(now.date() + datetime.timedelta(days=n)).isoformat() for n in range(15)]
+        found = [d for d in found if (_store().get_state('skip#' + d) or {}).get('skipped')]
+        return ', '.join(found) or 'nessuna'
+
+    section('⚙️ Automazione', schedule)
+    section('⭐ Preferenze', lambda: timetable.format_prefs(_store().get_state('prefs')))
+    section('🕘 Ultima esecuzione', last_run)
+    section('⏭️ Date saltate (prossimi 14 giorni)', skips)
+    section('🔌 Telegram', webhook)
+    return '\n'.join(lines)
+
+
 def _confirm(token, chat_id, owner, payload, update_id, store=None, summary=None, expires_at=None):
     text, keyboard = _confirmation_message(owner, payload, update_id, store, summary, expires_at)
     _send(token, chat_id, text, keyboard)
@@ -222,11 +314,20 @@ def _confirmation_message(owner, payload, update_id, store=None, summary=None, e
         owner, payload, expires_at or int(time.time()) + 300, str(update_id))
     names = {'book': 'Prenotazione', 'cancel': 'Cancellazione', 'waitlist_join': 'Ingresso in lista d’attesa',
              'waitlist_leave': 'Uscita dalla lista d’attesa', 'waitlist_confirm': 'Conferma dalla lista d’attesa',
-             'weekly': 'Modifica programmazione settimanale', 'disable': 'Disabilitazione automazione'}
+             'weekly': 'Modifica programmazione settimanale', 'disable': 'Disabilitazione automazione',
+             'prefs': 'Preferenze di prenotazione', 'skip': 'Occorrenza dell’automazione'}
     labels = {'activity_id': 'ID attività', 'date': 'Data', 'appointment_id': 'ID appuntamento',
-              'booking_id': 'ID impegno', 'days': 'Giorni', 'hour': 'Ora', 'minute': 'Minuti'}
-    details = '\n'.join(f'{label}: {", ".join(payload[key]) if key == "days" else payload[key]}'
-                        for key, label in labels.items() if key in payload)
+              'booking_id': 'ID impegno', 'days': 'Giorni', 'hour': 'Ora', 'minute': 'Minuti',
+              'day': 'Giorno', 'times': 'Orari in ordine di priorità'}
+
+    def value(key):
+        if isinstance(payload[key], list):
+            return ', '.join(payload[key]) or 'nessuna prenotazione'
+        return payload[key]
+
+    details = '\n'.join(f'{label}: {value(key)}' for key, label in labels.items() if key in payload)
+    if payload['action'] == 'skip':
+        details += '\nEffetto: ' + ('non prenotare questa data' if payload['skipped'] else 'riprendi a prenotare questa data')
     if summary:
         details = summary + '\n' + details
     return ('🤔 Confermi: ' + names[payload['action']] + '?\n' + details +
@@ -557,7 +658,7 @@ def _handle_callback(update, callback, token, owner):
         action = data.split(':')[1]
         _run_ui(token, chat_id, owner, _parse_ui(data, owner, update.get('update_id')))
         return
-    if data in ('menu:automation', 'menu:help'):
+    if data in ('menu:automation', 'menu:help', 'menu:orari', 'menu:status'):
         _handle_message({'chat': callback['message']['chat'], 'text': '/' + data.split(':')[1]}, token, owner)
         return
     if isinstance(data, str) and data.startswith('cancel:'):
@@ -588,6 +689,28 @@ def _handle_callback(update, callback, token, owner):
     if action in MUTATIONS:
         _dispatch(data)
         _send(token, chat_id, '📨 Operazione accettata dal worker. Verifica gli impegni per conoscere l’esito.')
+    elif action in ('prefs', 'skip'):
+        try:
+            job = store.claim_job(data)
+        except StoreConflict:
+            _send(token, chat_id, 'ℹ️ Operazione già ricevuta.')
+            return
+        try:
+            payload = job['payload']
+            if action == 'prefs':
+                store.put_state('prefs', timetable.set_day(store.get_state('prefs'), payload['day'], payload['times']))
+            else:
+                store.put_state('skip#' + payload['date'], {'skipped': payload['skipped']},
+                                purge_at=int(time.time()) + 30 * 86400)
+            store.finish_job(data, 'completed', {'status': 'confirmed'})
+        except Exception:
+            try:
+                store.finish_job(data, 'uncertain', {'status': 'uncertain'})
+            except Exception:
+                pass
+            _send(token, chat_id, '⚠️ Esito incerto: verifica con /prefs o /status prima di riprovare.')
+        else:
+            _send(token, chat_id, '✅ Preferenze aggiornate.' if action == 'prefs' else '✅ Occorrenza aggiornata.')
     elif action in ('weekly', 'disable'):
         try:
             job = store.claim_job(data)
@@ -678,13 +801,25 @@ def lambda_handler(event, context):
             or chat['id'] != sender['id']):
         return {'statusCode': 403, 'body': 'Forbidden'}
 
+    # L'update è autenticato: ogni esito è 200. Un 4xx/5xx farebbe ritentare a Telegram lo
+    # stesso update all'infinito, bloccando tutta la coda (è la causa del bot rimasto muto).
+    # L'errore si comunica all'utente; per ritentare basta rimandare il comando o il bottone.
     try:
         if callback is not None:
             _handle_callback(update, callback, token, str(sender['id']))
         else:
             _handle_message(message, token, str(sender['id']), update.get('update_id'))
-    except (ValueError, StoreConflict):
-        return {'statusCode': 400, 'body': 'Invalid request or Telegram response'}
+    except (ValueError, StoreConflict) as exc:
+        usage = str(exc).rstrip('. ') + '. ' if str(exc).startswith('Uso:') else ''
+        _notify_failure(token, chat['id'], '⚠️ Richiesta non valida o scaduta. ' + usage + 'Riprova da /start.')
     except Exception:
-        return {'statusCode': 502, 'body': 'Request failed'}
+        _notify_failure(token, chat['id'], '⚠️ Errore temporaneo, nessun tentativo automatico. '
+                        'Riprova; se era una modifica verifica prima gli impegni con /bookings.')
     return {'statusCode': 200, 'body': 'OK'}
+
+
+def _notify_failure(token, chat_id, text):
+    try:
+        _send(token, chat_id, text)
+    except Exception:
+        pass  # il 200 evita il ritentativo; se Telegram non risponde l'utente non vede l'avviso

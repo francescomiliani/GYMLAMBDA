@@ -73,7 +73,33 @@ retry di consegna dello Scheduler).
   configurato e fallisce, non c'e' fallback silenzioso.
 - Autorizzazione e notifiche usano lo stesso ID Telegram.
 - I servizi (`isService`) non sono prenotabili dal bot.
+- Dopo l'autenticazione ogni update riceve HTTP 200, anche in caso di errore (l'utente vede un
+  avviso). Un 4xx/5xx farebbe ritentare a Telegram lo stesso update all'infinito e bloccherebbe la
+  coda: e' la causa del bot rimasto muto il 2026-11-18. 4xx restano solo per richieste non
+  autenticate o malformate (403, 405, 413, 400 su corpo non valido). Un errore transitorio non
+  viene ritentato da Telegram: l'utente ripreme il bottone, la conferma resta valida finche' non scade.
 - I callback usano ID impacchettati (`gs:`/`gw:`) per restare entro 64 byte.
+
+## Preferenze e fallback
+
+Dati nella stessa tabella DynamoDB (`state#prefs`, `state#skip#DATA`, `state#last_run`).
+
+- `/prefs` mostra, `/prefs MON 07:00,12:30` imposta (con conferma), `/prefs MON off` toglie il giorno.
+  Gli orari sono quelli della sala attrezzi (`timetable.GYM_SLOTS`) in ordine di priorita': prima
+  le 07:00, poi le 12:30. Il giorno e' quello della lezione; la lezione prenotata e' sempre a sette
+  giorni dall'esecuzione, quindi coincide con il giorno di esecuzione.
+- `scheduled_guard` legge le preferenze prima del claim e chiama `app.book` con la lista ordinata
+  (`fallback_times`): vale il primo slot con `Notes == 'Prenota'`, senza POST su slot non prenotabili.
+  Giorno senza preferenze (con preferenze presenti) oppure data in `/skip`: nessuna prenotazione e
+  nessun claim. Nessuna preferenza salvata: orario predefinito `BOT_BOOKING_TIME` come prima.
+  Un errore di lettura dello stato interrompe senza prenotare.
+- `/skip YYYY-MM-DD` salta la lezione di quella data, `/skip off YYYY-MM-DD` la riattiva.
+- `/status` riassume schedule e prossima esecuzione, preferenze, ultima esecuzione, date saltate e
+  `getWebhookInfo` (update in coda, ultimo errore). Ogni sezione fallisce in modo indipendente.
+- Il corso (sala corsi) e' previsto nel modello (`activity` per voce) ma oggi le preferenze validano
+  solo la sala attrezzi.
+
+Sezione verificata sul codice e sui test il 2026-11-18; le risorse AWS non sono state rivalidate.
 
 ## Schedule
 

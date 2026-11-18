@@ -39,6 +39,18 @@ class BotStore:
         response = self.client.get_item(TableName=self.table_name, Key=self._encode({'pk': key}), ConsistentRead=True)
         return {key: self.deserializer.deserialize(value) for key, value in response.get('Item', {}).items()} or None
 
+    def get_state(self, key):
+        """Plain value stored with put_state, or None."""
+        item = self._get('state#' + key)
+        return item['value'] if item else None
+
+    def put_state(self, key, value, purge_at=None):
+        """Store a value; purge_at (Unix) lets TTL clean it, None keeps it forever."""
+        item = {'pk': 'state#' + key, 'value': value}
+        if purge_at is not None:
+            item['purge_at'] = int(purge_at)
+        self.client.put_item(TableName=self.table_name, Item=self._encode(item))
+
     def create_confirmation(self, owner, payload, expires_at):
         """Persist an opaque token for owner and payload until Unix expires_at."""
         if not isinstance(owner, str) or not owner or not isinstance(payload, dict) or expires_at <= int(self.clock()):
