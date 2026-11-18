@@ -18,6 +18,8 @@ ALLOWLIST = (
     'app.py',
     'bot_scheduler.py',
     'bot_store.py',
+    'calendar_ics.py',
+    'google_calendar.py',
     'requirements.txt',
     'scheduled_guard.py',
     'ssm_config.py',

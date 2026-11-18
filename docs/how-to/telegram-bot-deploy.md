@@ -3,7 +3,7 @@ title: Deploy the Telegram bot
 type: how-to
 status: canonical
 owner: gymbooking
-last-verified: 2026-11-12
+last-verified: 2026-11-18
 relevant-code:
   - bot-template.yaml
   - scripts/build_bot_package.py
@@ -18,13 +18,14 @@ stampare token o segreti. Login CLI: `aws login --profile aws-personale`
 
 ## 1. Segreti SSM (una sola volta)
 
-Quattro `SecureString` Standard, creati con `Overwrite=False` da SDK, leggendo i
-valori da file locali e non da argomenti di comando:
+Cinque `SecureString` Standard, creati fuori dallo stack, leggendo i valori da
+file locali e non da argomenti di comando:
 
 - `/gymbot/telegram-bot-token`
 - `/gymbot/telegram-webhook-secret` (generato casualmente, non rigenerare a ogni deploy)
 - `/gymbot/sportrick-username`
 - `/gymbot/sportrick-password`
+- `/gymbot/google-calendar` (JSON `client_id`, `client_secret`, `refresh_token`; creato il 2026-11-18). Stato OAuth e URL pubblici: sezione Calendario in `docs/architecture/telegram-bot-aws.md`.
 
 Ruotare il webhook secret richiede di rieseguire `setWebhook`.
 
@@ -52,12 +53,17 @@ sam deploy -t .aws-sam/build/template.yaml --stack-name gymbot-telegram \
 
 Non impostare `ReservedConcurrentExecutions`: il limite dell'account lo rifiuta.
 
+In un aggiornamento conserva i parametri già presenti, incluso `GoogleCalendarParameterName`.
+Un valore vuoto (`SnsTopicArn`) si passa solo come `ParameterKey=SnsTopicArn,ParameterValue=`:
+la forma `SnsTopicArn=` viene rifiutata. Non stampare i valori. Lo stack è stato aggiornato
+il 2026-11-18 (`UPDATE_COMPLETE`); la schedule è rimasta `DISABLED`.
+
 ## 4. Telegram
 
 - `setWebhook` verso la Function URL (output `WebhookUrl`) con `secret_token` uguale
   al parametro SSM e `allowed_updates=["message","callback_query"]`.
 - `setMyCommands`: `start`, `bookings`, `activities`, `automation`, `weekly`,
-  `disable`, `help`. Il menu non si aggiorna da solo.
+  `disable`, `orari`, `calendar`, `prefs`, `skip`, `status`, `help`. Il menu non si aggiorna da solo.
   Telegram usa lo scope piu' specifico: un elenco su `all_private_chats` o
   `all_group_chats` nasconde quello `default`. Imposta tutti e tre gli scope e
   verifica ciascuno con `getMyCommands`. Il client ha una cache: riapri la chat.
@@ -86,12 +92,11 @@ invece della Lambda legacy `GymBooking-personale`:
 
 - Payload `{"schedule_arn": <arn>, "scheduled_time": "<aws.scheduler.scheduled-time>"}`.
 - Retry 0, `MaximumEventAgeInSeconds` 60 (prima 185 retry / 86400 s).
-- Il guard registra l'occorrenza in DynamoDB (at-most-once) e poi chiama la legacy.
+- Il guard registra l'occorrenza in DynamoDB (at-most-once) e prenota con `app.lambda_handler` nello stesso pacchetto. Non invoca la Lambda legacy.
 - Ruolo scheduler: aggiunta la policy inline `InvokeGymBookingGuard`; la vecchia
   `InvokeGymBooking` e' stata lasciata come backup per il rollback.
 - La Lambda legacy resta deployata e invocabile direttamente.
-- Il guard prenota sempre l'orario `BookingTime` (default 07:00) a +7 giorni dalla
-  data schedulata. Se cambi l'orario via `/weekly`, aggiorna anche `BookingTime`.
+- L'orario è la preferenza del giorno (`/prefs`). Senza preferenze salvate usa `BookingTime` (default 07:00), a +7 giorni dalla data schedulata. Un giorno senza preferenza, o una data in `/skip`, non prenota.
 
 Rollback della sola schedule (lasciarla `DISABLED`): `update-schedule` con target
 `arn:aws:lambda:eu-north-1:163876584948:function:GymBooking-personale`, `Input`

@@ -158,7 +158,8 @@ class SportrickClient:
         if not all(booking.get(k) for k in ('description', 'DateStart', 'TimeStart')):
             raise ValueError('Dati della prenotazione incompleti')
         result = self.mutate('/Booking/DeleteBooking', {'id': booking_id})
-        result.update(course=booking['description'], date=booking['DateStart'], time=booking['TimeStart'])
+        result.update(course=booking['description'], date=booking['DateStart'], time=booking['TimeStart'],
+                      booking_id=str(booking_id))
         return result
 
     def waitlist_leave(self, booking_id):
@@ -197,7 +198,8 @@ class SportrickClient:
                 return {'status': 'uncertain'}
             message = result.get('message')
             if message == 'Prenotazione confermata con successo.':
-                return {'status': 'confirmed', 'message': message, 'course': slot.get('EventName'), 'date': date, 'time': slot.get('TimeStart')}
+                return {'status': 'confirmed', 'message': message, 'course': slot.get('EventName'),
+                        'date': date, 'time': slot.get('TimeStart'), 'appointment_id': str(appointment_id)}
             if result.get('status') == 'ERROR':
                 return {'status': 'rejected', 'message': message}
             return {'status': 'uncertain', 'message': message}

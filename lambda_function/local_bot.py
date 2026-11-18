@@ -201,8 +201,25 @@ class LocalBot:
                     'skipped': f'⏭️ Prenotazione programmata saltata per {date} (data saltata o nessuna preferenza per quel giorno).',
                     }.get(status, '⚠️ Esito prenotazione programmata incerto: verifica gli impegni.')
             telegram_bot._send(self.token, self.chat, text)
+            if status == 'confirmed' and isinstance(result, dict):
+                self._remember_calendar(result)
         except telegram_bot.TelegramError:
             LOG.warning('Notifica Telegram non accettata; esito salvato nel database')
+
+    def _remember_calendar(self, result):
+        try:
+            from pathlib import Path
+            if __package__:
+                from . import google_calendar
+            else:
+                import google_calendar
+            outcome = google_calendar.publish(
+                result, self.store, path=Path.home() / '.config' / 'gymbooking' / 'google-calendar.json')
+            if outcome.get('ics'):
+                telegram_bot._send_document(self.token, self.chat, 'palestra.ics', outcome['ics'],
+                                            'Palestra. Un secondo import può duplicare l\'evento.')
+        except Exception:
+            LOG.warning('Calendario non aggiornato; la prenotazione resta confermata')
 
     def poll_once(self):
         self.run_scheduled(datetime.datetime.now(ROME))

@@ -235,7 +235,7 @@ class TelegramBotTests(unittest.TestCase):
         self.assertEqual(self.invoke(), 200)
         keyboard = self.post.call_args.kwargs['json']['reply_markup']['inline_keyboard']
         self.assertEqual([b['callback_data'] for row in keyboard for b in row],
-                         ['read:bookings', 'read:activities', 'menu:orari', 'menu:status', 'menu:automation', 'menu:help'])
+                         ['read:bookings', 'read:activities', 'menu:orari', 'menu:calendar', 'menu:status', 'menu:automation', 'menu:help'])
         with patch.object(telegram_bot, '_scheduler') as scheduler:
             scheduler.return_value.get_schedule.return_value = {'State': 'DISABLED'}
             self.assertEqual(self.callback('menu:automation'), 200)
@@ -467,7 +467,7 @@ class TelegramBotTests(unittest.TestCase):
         self.assertIn('Stato del bot', self.last()['text'])
 
     def test_orari_and_status_reject_extra_arguments_quietly(self):
-        for text in ('/orari x', '/status x'):
+        for text in ('/orari x', '/status x', '/calendar x'):
             self.message['text'] = text
             self.post.reset_mock()
             self.assertEqual(self.invoke(), 200)

@@ -3,7 +3,7 @@ title: How-to index
 type: how-to
 status: canonical
 owner: gymbooking
-last-verified: 2026-11-12
+last-verified: 2026-11-18
 ---
 
 # docs/how-to/ - index

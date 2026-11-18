@@ -3,7 +3,7 @@ title: Architecture index
 type: architecture
 status: canonical
 owner: gymbooking
-last-verified: 2026-11-12
+last-verified: 2026-11-18
 ---
 
 # docs/architecture/ - index
@@ -14,5 +14,5 @@ esegue mutazioni sul portale.
 
 | File | Quando leggerlo |
 |---|---|
-| [telegram-bot-aws.md](telegram-bot-aws.md) | Architettura e diagramma del bot, flussi webhook, worker e guardia, risorse AWS, segreti e limiti noti. |
+| [telegram-bot-aws.md](telegram-bot-aws.md) | Architettura e diagramma del bot, flussi webhook, worker e guardia, calendario Google, risorse AWS, segreti e limiti noti. |
 | [architecture.drawio](architecture.drawio) / [PNG](architecture.drawio.png) | Diagramma modificabile e anteprima dell'architettura locale. |

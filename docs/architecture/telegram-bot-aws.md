@@ -3,7 +3,7 @@ title: Telegram bot on AWS
 type: architecture
 status: canonical
 owner: gymbooking
-last-verified: 2026-11-12
+last-verified: 2026-11-18
 relevant-code:
   - bot-template.yaml
   - lambda_function/telegram_bot.py
@@ -14,7 +14,10 @@ relevant-code:
   - lambda_function/ssm_config.py
   - lambda_function/app.py
   - lambda_function/sportrick.py
+  - lambda_function/calendar_ics.py
+  - lambda_function/google_calendar.py
   - scripts/build_bot_package.py
+  - scripts/google_calendar_auth.py
 ---
 
 # Telegram bot on AWS
@@ -99,14 +102,43 @@ Dati nella stessa tabella DynamoDB (`state#prefs`, `state#skip#DATA`, `state#las
 - Il corso (sala corsi) e' previsto nel modello (`activity` per voce) ma oggi le preferenze validano
   solo la sala attrezzi.
 
-Sezione verificata sul codice e sui test il 2026-11-18; le risorse AWS non sono state rivalidate.
+Sezione verificata sul codice e sui test il 2026-11-18. Lo stesso giorno lo stack `gymbot-telegram` è in `UPDATE_COMPLETE` e la schedule `gym-booking-mwf-0700` resta `DISABLED` sul guard.
+
+## Calendario
+
+`/calendar` legge gli impegni e scrive su Google Calendar (`primary`) le lezioni ancora aperte.
+Promemoria popup a 12 ore e a 1 ora, fuso `Europe/Rome`. Servizi e liste d'attesa restano fuori.
+L'id dell'evento sta in `state#gcal#<id>` e la stessa `iCalUID` (`gymbooking-<id>@gymbooking`) evita
+un secondo evento se skill e Lambda scrivono entrambi. Senza segreto, o se la chiamata fallisce,
+il bot manda solo allora un file `.ics`: un import ripetuto può duplicare, e cancellare sul
+portale non toglie un evento importato da file. La cancellazione confermata cancella l'evento
+Google quando l'id è noto.
+
+Il segreto è un JSON `client_id`, `client_secret`, `refresh_token`. Dal deploy del 2026-11-18
+worker e guard lo leggono da SSM (`SSM_GOOGLE_CALENDAR`, parametro `/gymbot/google-calendar`,
+SecureString creato lo stesso giorno). Il webhook non ha quella variabile: in produzione la
+scrittura passa dal worker.
+In locale skill e `local_bot` usano `~/.config/gymbooking/google-calendar.json` (permessi `0600`).
+Il client OAuth desktop si chiama GymBooking, scope `https://www.googleapis.com/auth/calendar.events`,
+progetto Cloud «My First Project». Il consenso una tantum è `scripts/google_calendar_auth.py`.
+Manca il segreto: la prenotazione resta confermata e si usa il file `.ics`.
+
+L'app OAuth è esterna, stato In production dal 2026-11-18. Homepage
+`https://francescomiliani.github.io/gymbooking/`, privacy policy
+`https://francescomiliani.github.io/gymbooking/privacy.html`, dominio autorizzato
+`francescomiliani.github.io`. Il limite dei 7 giorni del refresh token vale solo in Testing.
+Google segnala comunque che lo scope `calendar.events` va sottoposto a verifica: la review non
+è stata inviata.
+
+Sezione verificata sul codice, sui test e sul parametro SSM il 2026-11-18.
 
 ## Schedule
 
-Il bot puo' consultare e disattivare la schedule. Giorni e ora si modificano
-solo a schedule `DISABLED`. `/enable` e' bloccato: la schedule ha 185 retry e la
-Lambda legacy non e' idempotente. `BotScheduler.enable()` esiste ma non e'
-collegato. Vedi `docs/decisions/0002-schedule-enable-blocked.md`.
+La schedule `gym-booking-mwf-0700` è `DISABLED` e dal 2026-11-12 invoca
+`scheduled_guard` con retry 0. Il bot puo' consultarla e disattivarla. Giorni e
+ora si modificano solo a schedule `DISABLED`. `/enable` resta bloccato: vedi
+`docs/decisions/0002-schedule-enable-blocked.md`. `BotScheduler.enable()` esiste
+ma non e' collegato.
 
 ## Limiti noti
 

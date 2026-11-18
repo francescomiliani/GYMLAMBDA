@@ -32,13 +32,13 @@ Per Raspberry Pi o Linux, installazione, passaggio dal webhook e gestione: [guid
 ## Bot Telegram interattivo: sviluppo locale
 
 Il repository contiene un bot privato in sviluppo e il template separato
-`bot-template.yaml`. Distribuito il 12/11/2026 come stack `gymbot-telegram` (eu-north-1). I segreti sono in
+`bot-template.yaml`. Distribuito il 12/11/2026 come stack `gymbot-telegram` (eu-north-1) e aggiornato il 18/11/2026 con la scrittura su Google Calendar. I segreti sono in
 SSM Parameter Store (`/gymbot/*`, SecureString). Pacchetto: `python3 scripts/build_bot_package.py`,
 poi `sam build/deploy` con Python 3.12. Rollback: `deleteWebhook` su Telegram e
 `aws cloudformation delete-stack --stack-name gymbot-telegram`. La concorrenza riservata del
 webhook non è utilizzabile (limite account): modifiche schedule concorrenti non sono serializzate.
-La guardia `scheduled_guard` è distribuita ma non è il target della schedule. Il bot non deve essere distribuito prima della revisione
-dell'integrazione, della verifica delle quote e di un'approvazione esplicita.
+La schedule `gym-booking-mwf-0700` resta `DISABLED` e punta a `scheduled_guard`. Un deploy
+richiede un'approvazione esplicita e non riattiva la schedule né tocca `GymBooking-personale`.
 
 Il menu consente di consultare attività e impegni, scegliere giorno e lezione e
 confermare le operazioni; sono disponibili anche comandi testuali in `/help`. Le
@@ -48,7 +48,10 @@ non sono prenotabili dal bot.
 
 Altri comandi: `/orari` (griglia sala attrezzi e corsi, da [foto in repo](docs/reference/orari-palestra.md)),
 `/prefs MON 07:00,12:30` (orari preferiti per giorno con fallback in ordine, con conferma),
-`/skip DATA` (salta una lezione) e `/status` (schedule, ultima esecuzione, coda Telegram).
+`/skip DATA` (salta una lezione), `/status` (schedule, ultima esecuzione, coda Telegram)
+e `/calendar` (scrive gli impegni futuri su Google Calendar; se manca il collegamento allega un file `.ics`).
+
+Il collegamento Google sta in `~/.config/gymbooking/google-calendar.json` (permessi `0600`, non va committato) e, per la Lambda, nel parametro SSM `/gymbot/google-calendar`. Scope `calendar.events`, calendario `primary`, promemoria a 12 ore e a 1 ora. L'app OAuth GymBooking è sul progetto Cloud «My First Project», stato In production dal 18/11/2026. Homepage e privacy policy: <https://francescomiliani.github.io/gymbooking/>. Lo scope del calendario resta da sottoporre a verifica Google. Dettaglio in `docs/architecture/telegram-bot-aws.md`.
 
 L'automazione può essere consultata e sospesa; giorni e ora sono modificabili solo a
 schedule disattivata. **La riattivazione dal bot è bloccata**: i retry della schedule

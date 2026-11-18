@@ -32,7 +32,7 @@ HELP = ('📖 Comandi: /bookings, /activities, /schedule ID DATA, '
         '/book ATTIVITA DATA APPUNTAMENTO, /cancel ID, '
         '/waitlist_join ATTIVITA DATA APPUNTAMENTO, /waitlist_leave ID, '
         '/waitlist_confirm ID, /automation, /weekly GIORNI HH:MM, /disable, '
-        '/orari, /prefs [GIORNO ORARI|off], /skip [off] DATA, /status. '
+        '/orari, /calendar, /prefs [GIORNO ORARI|off], /skip [off] DATA, /status. '
         'Per le azioni servono gli ID mostrati da /bookings, /activities e /schedule. '
         'Giorni: MON,TUE,WED,THU,FRI,SAT,SUN. L’attivazione è bloccata. '
         'Esempio preferenze con fallback: /prefs MON 07:00,12:30 (prima le 7, poi le 12:30).')
@@ -79,6 +79,20 @@ def _telegram(token, method, payload):
             raise ValueError('Invalid response')
         return result.get('result')
     except (requests.RequestException, ValueError):
+        raise TelegramError('Telegram request failed') from None
+
+
+def _send_document(token, chat_id, filename, content, caption):
+    try:
+        response = requests.post(
+            f'https://api.telegram.org/bot{token}/sendDocument',
+            data={'chat_id': chat_id, 'caption': caption[:1024]},
+            files={'document': (filename, content.encode(), 'text/calendar')}, timeout=15)
+        response.raise_for_status()
+        result = response.json()
+        if not isinstance(result, dict) or result.get('ok') is not True:
+            raise ValueError('Invalid response')
+    except (requests.RequestException, ValueError, TypeError, AttributeError):
         raise TelegramError('Telegram request failed') from None
 
 
@@ -166,13 +180,16 @@ def _handle_message(message, token, owner, update_id=None):
         _send(token, chat_id, HELP, [[{'text': '📅 Impegni', 'callback_data': 'read:bookings'},
                                       {'text': '🏋️ Attività', 'callback_data': 'read:activities'}],
                                      [{'text': '🗓️ Orari', 'callback_data': 'menu:orari'},
-                                      {'text': '📡 Stato', 'callback_data': 'menu:status'}],
-                                     [{'text': '⚙️ Automazione', 'callback_data': 'menu:automation'},
-                                      {'text': '❓ Aiuto', 'callback_data': 'menu:help'}]])
+                                      {'text': '📆 Calendario', 'callback_data': 'menu:calendar'}],
+                                     [{'text': '📡 Stato', 'callback_data': 'menu:status'},
+                                      {'text': '⚙️ Automazione', 'callback_data': 'menu:automation'}],
+                                     [{'text': '❓ Aiuto', 'callback_data': 'menu:help'}]])
     elif command == '/orari' and len(parts) == 1:
         _send(token, chat_id, timetable.format_week())
     elif command == '/status' and len(parts) == 1:
         _send(token, chat_id, _status_text(token))
+    elif command == '/calendar' and len(parts) == 1:
+        _run_ui(token, chat_id, owner, {'kind': 'calendar'})
     elif command in ('/prefs', '/skip'):
         _prefs_or_skip(command, parts, token, chat_id, owner, update_id)
     elif command in ('/bookings', '/activities', '/schedule'):
@@ -512,8 +529,8 @@ def _dispatch_read(request, ui, chat_id):
 
 def _read_request(ui):
     kind = ui['kind']
-    if kind in ('activities', 'bookings'):
-        return {'action': kind}
+    if kind in ('activities', 'bookings', 'calendar'):
+        return {'action': 'bookings' if kind != 'activities' else 'activities'}
     if kind == 'booking':
         return {'action': 'bookings'}
     return {'action': 'schedule', 'activity_id': ui['activity_id'], 'date': ui['date']}
@@ -614,13 +631,50 @@ def render_ui(ui, result, owner, store=None):
     return _confirmation_message(owner, payload, sel, store, summary)
 
 
+def calendar_view(items, store=None, now=None):
+    """Text for /calendar and, when Google did not take every class, the ICS file."""
+    if __package__:
+        from . import calendar_ics, google_calendar
+    else:
+        import calendar_ics
+        import google_calendar
+    outcome = google_calendar.sync(items if isinstance(items, list) else [], store, now=now)
+    if outcome['channel'] == 'empty':
+        return '📅 Nessun impegno futuro da mettere in calendario.', None
+    if outcome['channel'] == 'google':
+        return (f"📅 {outcome['count']} impegni scritti su Google Calendar. "
+                'Promemoria 12 ore prima e 1 ora prima.', None)
+    if outcome.get('count'):
+        text = f"📅 Scritti {outcome['count']} impegni su Google Calendar. Gli altri sono nel file. "
+    elif outcome.get('reason') == 'failed':
+        text = '📅 Google Calendar non ha accettato la scrittura. '
+    else:
+        text = '📅 Google Calendar non è configurato. '
+    return text + calendar_ics.IMPORT_NOTE, outcome.get('ics')
+
+
 def _run_ui(token, chat_id, owner, ui):
     request = _read_request(ui)
     if _async_reads():
         _dispatch_read(request, ui, chat_id)
         _send(token, chat_id, ASYNC_ACK)
         return
-    text, keyboard = render_ui(ui, telegram_worker.read_action(request), owner)
+    result = telegram_worker.read_action(request)
+    if ui.get('kind') == 'calendar':
+        store = None
+        try:
+            store = _store()
+        except Exception:
+            store = None
+        text, ics = calendar_view(result.get('bookings') if isinstance(result, dict) else None, store)
+        _send(token, chat_id, text)
+        if ics:
+            try:
+                _send_document(token, chat_id, 'palestra.ics', ics, text[:1024])
+            except TelegramError:
+                _send(token, chat_id, '⚠️ Non sono riuscito a inviare il file del calendario.')
+        return
+    text, keyboard = render_ui(ui, result, owner)
     _send(token, chat_id, text, keyboard)
 
 
@@ -658,7 +712,7 @@ def _handle_callback(update, callback, token, owner):
         action = data.split(':')[1]
         _run_ui(token, chat_id, owner, _parse_ui(data, owner, update.get('update_id')))
         return
-    if data in ('menu:automation', 'menu:help', 'menu:orari', 'menu:status'):
+    if data in ('menu:automation', 'menu:help', 'menu:orari', 'menu:status', 'menu:calendar'):
         _handle_message({'chat': callback['message']['chat'], 'text': '/' + data.split(':')[1]}, token, owner)
         return
     if isinstance(data, str) and data.startswith('cancel:'):

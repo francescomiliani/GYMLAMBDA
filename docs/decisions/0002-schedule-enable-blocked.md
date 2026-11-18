@@ -3,7 +3,7 @@ title: Schedule enable is blocked from the bot
 type: decision
 status: canonical
 owner: gymbooking
-last-verified: 2026-11-12
+last-verified: 2026-11-18
 relevant-code:
   - lambda_function/bot_scheduler.py
   - lambda_function/scheduled_guard.py
@@ -13,11 +13,15 @@ relevant-code:
 
 ## Contesto
 
-La schedule `gym-booking-mwf-0700` ha fino a 185 retry di consegna e la Lambda
+La schedule `gym-booking-mwf-0700` aveva fino a 185 retry di consegna e la Lambda
 legacy `GymBooking-personale` non e' idempotente: una riattivazione puo' produrre
 prenotazioni duplicate. La guardia `scheduled_guard` rende un'occorrenza
-at-most-once, ma non e' il target della schedule. Nessun controllo runtime
-dimostra IAM, retry Lambda e codice effettivo end to end.
+at-most-once.
+
+Dal 2026-11-12 la schedule, sempre `DISABLED`, punta al guard con retry 0.
+`/enable` resta bloccato: mancano la versione immutabile del guard, i retry
+Lambda a 0 e un'autorizzazione esplicita. Nessun controllo runtime dimostra
+ancora IAM, retry Lambda e codice effettivo end to end.
 
 ## Decisione
 

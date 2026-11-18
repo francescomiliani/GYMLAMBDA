@@ -3,7 +3,7 @@ title: Bot Telegram locale
 type: how-to
 status: canonical
 owner: gymbooking
-last-verified: 2026-11-13
+last-verified: 2026-11-18
 ---
 
 # Bot Telegram locale
@@ -34,6 +34,8 @@ Creare `~/.config/gymbooking/config.local.json`, proteggendolo con `chmod 600`, 
 ```
 
 L'ID utente e quello della chat privata devono corrispondere ai valori Telegram effettivi. Il bot accetta solo aggiornamenti che rispettano entrambi e che provengono da una chat privata. Non salvare il file nel repository; `config.local.json` è comunque ignorato da Git.
+
+Il calendario Google è un file a parte, `~/.config/gymbooking/google-calendar.json` (`chmod 600`). Il bot locale lo legge da solo dopo una prenotazione confermata. Senza quel file la conferma resta valida e, se Telegram è configurato, parte il file `.ics`. Il consenso si rifà con `python3 scripts/google_calendar_auth.py` (servono `GOOGLE_CLIENT_ID` e `GOOGLE_CLIENT_SECRET`). Non stampare il JSON. Stato dell'app OAuth e pagine pubbliche: sezione Calendario in `docs/architecture/telegram-bot-aws.md`.
 
 ## Passaggio dal webhook
 

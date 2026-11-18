@@ -48,7 +48,8 @@ class SkillTest(unittest.TestCase):
 
     def test_timetable_and_bot_commands(self):
         text = skill_text()
-        for token in ('/orari', '/prefs', '/skip', '/status', '07:00', '12:30', '18:15',
+        for token in ('/orari', '/prefs', '/skip', '/status', '/calendar', 'google-calendar.json',
+                      '/gymbot/google-calendar', '07:00', '12:30', '18:15',
                       '224715757956816031', 'GYM_ACTIVITY_ID', 'Giorno non valido',
                       'Notes == "Prenota"', 'DISABLED', 'ADR 0002'):
             self.assertIn(token, text, token)

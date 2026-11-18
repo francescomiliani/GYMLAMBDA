@@ -76,10 +76,47 @@ def local_now():
     return datetime.datetime.now(LOCAL_TZ)
 
 
+def _calendar_store():
+    table = os.environ.get('BOT_TABLE_NAME')
+    if not table:
+        return None
+    try:
+        import boto3
+        if __package__:
+            from .bot_store import BotStore
+        else:
+            from bot_store import BotStore
+        return BotStore(boto3.client('dynamodb'), table)
+    except Exception:
+        return None
+
+
+def _calendar_side(result, action):
+    """Google first. Returns (suffix for the text, ICS or None). Never raises."""
+    try:
+        if __package__:
+            from . import google_calendar
+        else:
+            import google_calendar
+        if action == 'cancel':
+            outcome = google_calendar.remove(result.get('booking_id') or result.get('id'), _calendar_store())
+            if outcome == 'failed':
+                return " L'evento potrebbe essere ancora su Google Calendar.", None
+            return '', None
+        if action != 'book':
+            return '', None
+        written = google_calendar.publish(result, _calendar_store())
+        result['calendar'] = written.get('channel')
+        return '', written.get('ics')
+    except Exception:
+        return '', None
+
+
 # La notifica non deve mai far fallire una prenotazione già confermata.
 def notify(result, action='book'):
     label = 'cancellazione confermata' if action == 'cancel' else 'prenotazione confermata'
-    message = f"{result['date']} {result['time']} - {result.get('course') or 'SALA ATTREZZI'} - {label}"
+    suffix, ics = _calendar_side(result, action)
+    message = f"{result['date']} {result['time']} - {result.get('course') or 'SALA ATTREZZI'} - {label}" + suffix
     notifications = {}
     topic = os.environ.get('SNS_TOPIC_ARN')
     if topic:
@@ -105,6 +142,14 @@ def notify(result, action='book'):
         notifications['telegram'] = 'failed'
         if token and chat_id:
             try:
+                if ics:
+                    try:
+                        requests.post(
+                            f'https://api.telegram.org/bot{token}/sendDocument',
+                            data={'chat_id': chat_id, 'caption': 'Palestra. Un secondo import può duplicare l\'evento.'},
+                            files={'document': ('palestra.ics', ics.encode(), 'text/calendar')}, timeout=15)
+                    except Exception:
+                        pass
                 response = requests.post(f'https://api.telegram.org/bot{token}/sendMessage', json={'chat_id': chat_id, 'text': message}, timeout=15)
                 response.raise_for_status()
                 if response.json().get('ok') is True:

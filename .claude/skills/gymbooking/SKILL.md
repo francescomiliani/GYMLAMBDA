@@ -1,6 +1,6 @@
 ---
 name: gymbooking
-description: Gestisce la palestra Reply Wellness sul portale Sportrick con richieste HTTP dirette (curl), senza Lambda. Usare per elencare corsi, vedere il calendario, controllare gli impegni, prenotare o cancellare una lezione, entrare o uscire dalla lista d'attesa, e per orari, preferenze con fallback, skip e stato del bot Telegram. Trigger - palestra, gym, Sportrick, Reply Wellness, prenota/cancella lezione, "cosa ho prenotato", lista d'attesa, /orari, /prefs, /skip, /status. Use for booking gym classes on Sportrick.
+description: Gestisce la palestra Reply Wellness sul portale Sportrick con richieste HTTP dirette (curl), senza Lambda. Usare per elencare corsi, vedere il calendario, controllare gli impegni, prenotare o cancellare una lezione, entrare o uscire dalla lista d'attesa, e per orari, preferenze con fallback, skip, stato e calendario del bot Telegram. Trigger - palestra, gym, Sportrick, Reply Wellness, prenota/cancella lezione, "cosa ho prenotato", lista d'attesa, /orari, /prefs, /skip, /status, /calendar. Use for booking gym classes on Sportrick.
 ---
 
 # GymBooking via HTTP
@@ -165,6 +165,28 @@ try:
     print('sns: accepted')
 except Exception:
     print('sns: failed')
+if kind == 'book':
+    try:
+        import sys
+        root = next(p for p in (Path.cwd() / 'lambda_function',
+                                Path.home() / 'personal-projects' / 'GYMLAMBDA' / 'lambda_function')
+                    if (p / 'google_calendar.py').is_file())
+        sys.path.insert(0, str(root))
+        import google_calendar
+        outcome = google_calendar.publish(
+            {'date': date, 'time': time, 'course': course, 'description': course},
+            path=cfg / 'google-calendar.json')
+        print('calendar:', outcome['channel'])
+        if outcome.get('ics') and (cfg / 'telegram-token').is_file() and (cfg / 'telegram-chat-id').is_file():
+            import calendar_ics
+            body, ctype = calendar_ics.document_body(
+                (cfg / 'telegram-chat-id').read_text().strip(), 'palestra.ics', outcome['ics'], 'Palestra')
+            req = urllib.request.Request(
+                f"https://api.telegram.org/bot{(cfg / 'telegram-token').read_text().strip()}/sendDocument",
+                body, {'Content-Type': ctype})
+            print('calendar-file:', 'accepted' if json.load(urllib.request.urlopen(req, timeout=15)).get('ok') is True else 'failed')
+    except Exception:  # può contenere un token: non stamparla
+        print('calendar: failed')
 PY
 }
 ```
@@ -214,6 +236,17 @@ nel bot: non premerla al posto dell'utente.
 - I corsi sono nel modello (`activity` per voce) ma oggi le preferenze accettano solo la sala
   attrezzi. Per prenotare un corso usare il flusso HTTP di questa skill, con conferma.
 - La schedule è `DISABLED` e `/enable` è bloccato (ADR 0002). Non riattivarla.
+- `/calendar` allinea gli impegni futuri (non i servizi, non la lista d'attesa) su Google Calendar.
+  Prima la scrittura diretta, con promemoria a 12 ore e a 1 ora. Il file `.ics` parte solo se manca
+  `~/.config/gymbooking/google-calendar.json` o se Google rifiuta la chiamata. Non importare il file
+  se la scrittura è riuscita: un secondo import può duplicare. Cancellare sul portale non toglie un
+  evento importato da file; la cancellazione confermata toglie l'evento Google quando l'id è noto.
+  Il JSON non si stampa né si committa. Sulla Lambda il nome del parametro è `/gymbot/google-calendar`.
+  L'app OAuth è In production dal 2026-11-18 (homepage `https://francescomiliani.github.io/gymbooking/`).
+  Lo scope calendario non è ancora verificato da Google: un consenso nuovo può mostrare l'avviso
+  «app non verificata».
+- `notify book` prova la stessa scrittura. Il segreto non si stampa. Un errore di calendario non
+  cambia l'esito della prenotazione.
 
 ## Flussi tipici
 

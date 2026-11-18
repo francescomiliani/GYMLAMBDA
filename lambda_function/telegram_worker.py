@@ -100,12 +100,13 @@ def lambda_handler(event, context):
             return {'status': 'unauthorized'}
         if not chat_id or not token or event.get('chat_id') != chat_id:
             return {'status': 'unauthorized'}
+        document = None
         try:
             result = read_action(event['read'])
             keyboard = None
             if 'ui' in event:
                 ui = event['ui']
-                if not isinstance(ui, dict) or ui.get('kind') not in ('activities', 'bookings', 'schedule', 'day', 'slot', 'booking'):
+                if not isinstance(ui, dict) or ui.get('kind') not in ('activities', 'bookings', 'schedule', 'day', 'slot', 'booking', 'calendar'):
                     raise ValueError('Descrittore non valido')
                 if __package__:
                     from . import telegram_bot
@@ -115,7 +116,12 @@ def lambda_handler(event, context):
                     raise ValueError('Lettura non coerente')
                 if ui['kind'] in ('slot', 'booking') and not os.environ.get('BOT_TABLE_NAME'):
                     raise RuntimeError('Bot table is not configured')
-                text, keyboard = telegram_bot.render_ui(ui, result, chat_id)
+                document = None
+                if ui['kind'] == 'calendar':
+                    text, document = telegram_bot.calendar_view(result.get('bookings'), _state_store())
+                    keyboard = None
+                else:
+                    text, keyboard = telegram_bot.render_ui(ui, result, chat_id)
                 if not isinstance(text, str) or not text or (keyboard is not None and not isinstance(keyboard, list)):
                     raise ValueError('Rendering non valido')
             else:
@@ -124,6 +130,7 @@ def lambda_handler(event, context):
         except Exception:
             text = '😕 Impossibile recuperare i dati richiesti.'
             keyboard = None
+            document = None
             status = 'error'
         try:
             for start in range(0, len(text), 4000):
@@ -135,6 +142,8 @@ def lambda_handler(event, context):
                 response.raise_for_status()
                 if response.json().get('ok') is not True:
                     return {'status': 'delivery_failed'}
+            if document:
+                telegram_bot._send_document(token, chat_id, 'palestra.ics', document, text[:1024])
         except Exception:
             return {'status': 'delivery_failed'}
         return {'status': status}
@@ -164,9 +173,51 @@ def lambda_handler(event, context):
     chat_id = os.environ.get('TELEGRAM_CHAT_ID')
     if token and chat_id:
         try:
+            note = _calendar_after_job(result, store, token, chat_id)
+            text = outcome_text(result) + (('\n' + note) if note else '')
             response = requests.post(f'https://api.telegram.org/bot{token}/sendMessage',
-                                     json={'chat_id': chat_id, 'text': outcome_text(result)}, timeout=15)
+                                     json={'chat_id': chat_id, 'text': text}, timeout=15)
             response.raise_for_status()
         except Exception:
             pass
     return result
+
+
+def _state_store():
+    table = os.environ.get('BOT_TABLE_NAME')
+    if not table:
+        return None
+    try:
+        import boto3
+        if __package__:
+            from .bot_store import BotStore
+        else:
+            from bot_store import BotStore
+        return BotStore(boto3.client('dynamodb'), table)
+    except Exception:
+        return None
+
+
+def _calendar_after_job(result, store, token, chat_id):
+    """Write or delete the Google event. An ICS file is only the fallback. Never raises."""
+    if not isinstance(result, dict) or result.get('status') != 'confirmed':
+        return ''
+    try:
+        if __package__:
+            from . import google_calendar, telegram_bot
+        else:
+            import google_calendar
+            import telegram_bot
+        if result.get('booking_id'):
+            if google_calendar.remove(result.get('booking_id'), store) == 'failed':
+                return "L'evento potrebbe essere ancora su Google Calendar."
+            return ''
+        if not (result.get('date') or result.get('DateStart')):
+            return ''
+        outcome = google_calendar.publish(result, store)
+        if outcome.get('ics'):
+            telegram_bot._send_document(token, chat_id, 'palestra.ics', outcome['ics'],
+                                        'Palestra. Un secondo import può duplicare l\'evento.')
+    except Exception:
+        return ''
+    return ''
