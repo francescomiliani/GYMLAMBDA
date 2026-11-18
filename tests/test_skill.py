@@ -46,6 +46,15 @@ class SkillTest(unittest.TestCase):
         self.assertIn('non ritentare', text)
         self.assertIn('europe/rome', text)
 
+    def test_timetable_and_bot_commands(self):
+        text = skill_text()
+        for token in ('/orari', '/prefs', '/skip', '/status', '07:00', '12:30', '18:15',
+                      '224715757956816031', 'GYM_ACTIVITY_ID', 'Giorno non valido',
+                      'Notes == "Prenota"', 'DISABLED', 'ADR 0002'):
+            self.assertIn(token, text, token)
+        compact = re.sub(r'\s+', ' ', text.lower())
+        self.assertIn('solo la sala attrezzi', compact)
+
     def test_notify_block(self):
         text = skill_text()
         block = re.search(r"python3 - \"\$@\" <<'PY'\n(.*?)\nPY\n", text, re.S).group(1)

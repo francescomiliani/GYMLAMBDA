@@ -1,6 +1,6 @@
 ---
 name: gymbooking
-description: Gestisce la palestra Reply Wellness sul portale Sportrick con richieste HTTP dirette (curl), senza Lambda. Usare per elencare corsi, vedere il calendario, controllare gli impegni, prenotare o cancellare una lezione, entrare o uscire dalla lista d'attesa. Trigger - palestra, gym, Sportrick, Reply Wellness, prenota/cancella lezione, "cosa ho prenotato", lista d'attesa. Use for booking gym classes on Sportrick.
+description: Gestisce la palestra Reply Wellness sul portale Sportrick con richieste HTTP dirette (curl), senza Lambda. Usare per elencare corsi, vedere il calendario, controllare gli impegni, prenotare o cancellare una lezione, entrare o uscire dalla lista d'attesa, e per orari, preferenze con fallback, skip e stato del bot Telegram. Trigger - palestra, gym, Sportrick, Reply Wellness, prenota/cancella lezione, "cosa ho prenotato", lista d'attesa, /orari, /prefs, /skip, /status. Use for booking gym classes on Sportrick.
 ---
 
 # GymBooking via HTTP
@@ -181,9 +181,39 @@ Messaggi (stessi per entrambi i canali, corso/data/ora dall'impegno confermato):
 ## Orari di riferimento
 
 Foto ufficiale: `docs/reference/orari-palestra-2026-11.png` (tabelle in `docs/reference/orari-palestra.md`,
-dati in `lambda_function/timetable.py`). Sala attrezzi lun-ven 07:00-09:00, 12:30-14:30, 18:15-20:15; sala
-corsi con orari e nomi fissi per giorno (es. lun 13:00 GAG, mar 18:30 Yoga). Usare la tabella per orientarsi
-o se il calendario non risponde; per disponibilita' e `AppointmentId` vale sempre `GetActivitySchedule`.
+dati in `lambda_function/timetable.py`, verificata il 2026-11-18). Sala attrezzi lun-ven 07:00-09:00,
+12:30-14:30, 18:15-20:15. Sala corsi, per orientarsi: lun 13:00 GAG e 18:30 Functional Training;
+mar 08:00 Functional Training, 13:00 Total Body, 18:30 Yoga; mer 13:00 Cross Training e 18:30 Total Body;
+gio 08:00 Cross Training, 13:00 Functional Training, 18:30 Pilates; ven 12:30 Cross Training,
+13:30 Functional Training, 18:30 Functional Training. Se la foto cambia, aggiornare `GYM_SLOTS`,
+`COURSES`, la tabella e la skill.
+
+La sala attrezzi nel client è l'attività `224715757956816031` (`timetable.GYM_ACTIVITY_ID`).
+Confermare nome e `data-flags` dal catalogo prima di usarla. Per disponibilità e `AppointmentId`
+vale sempre `GetActivitySchedule`: la tabella non dice se uno slot è libero.
+
+## Bot Telegram (preferenze, skip, stato)
+
+L'automazione non ha un endpoint Sportrick. Non inventare una richiesta HTTP per preferenze o skip,
+e non invocare la Lambda. I comandi stanno nel bot (webhook AWS). Ogni modifica chiede conferma
+nel bot: non premerla al posto dell'utente.
+
+- `/orari` mostra la griglia statica, senza chiamare il portale.
+- `/prefs` mostra le preferenze. `/prefs MON 07:00,12:30` imposta il giorno della lezione, in ordine
+  di priorità (prima le 07:00, poi le 12:30). Orari ammessi solo `07:00`, `12:30`, `18:15`.
+  `/prefs MON off` toglie quel giorno. Giorni ammessi: `MON`, `TUE`, `WED`, `THU`, `FRI`.
+- Con preferenze salvate, un giorno assente non viene prenotato. Senza nessuna preferenza resta
+  l'orario predefinito. Il primo slot con `Notes == "Prenota"` viene prenotato; gli altri non
+  ricevono un POST.
+- `/skip YYYY-MM-DD` salta la lezione di quella data, `/skip off YYYY-MM-DD` la riattiva.
+  Vale anche per oggi; una data nel passato viene rifiutata.
+- `/status` è sola lettura: schedule, prossima esecuzione, preferenze, ultima esecuzione,
+  date saltate, coda Telegram. «1 update in coda» durante `/status` è il comando ancora in corso.
+- Un comando non valido riceve il motivo (`Uso: ...`, `Giorno non valido`, `Orari ammessi`)
+  e HTTP 200. Non ritentare l'update: un 4xx bloccherebbe la coda Telegram.
+- I corsi sono nel modello (`activity` per voce) ma oggi le preferenze accettano solo la sala
+  attrezzi. Per prenotare un corso usare il flusso HTTP di questa skill, con conferma.
+- La schedule è `DISABLED` e `/enable` è bloccato (ADR 0002). Non riattivarla.
 
 ## Flussi tipici
 
@@ -192,6 +222,8 @@ o se il calendario non risponde; per disponibilita' e `AppointmentId` vale sempr
   chiedere conferma, prenotare, rileggere impegni, notificare, riferire.
 - **"Cancella ..."** impegni, individuare l'impegno, chiedere conferma, cancellare, verificare, notificare.
 - **Lezione piena** proporre la lista d'attesa, mai insistere con `BookAppointment`.
+- **Preferenze o un giorno da saltare** sono comandi del bot (`/prefs`, `/skip`), non prenotazioni
+  sul portale. Preparare il comando e lasciare la conferma all'utente.
 - **Notificare**: `notify book 2026-11-19 18:30 "PILATES"` (tipi: `book`, `cancel`, `wl_join`, `wl_leave`).
 
 Report finale sempre con l'esito: confermato, rifiutato o incerto. A fine lavoro `rm -f "$CJ"`.
