@@ -42,6 +42,29 @@ class TimetableTests(unittest.TestCase):
         self.assertEqual(timetable.resolve_times(None, '2026-11-24', '18:15'), ['18:15'])  # nessuna pref: legacy
         self.assertEqual(timetable.resolve_times(None, '2026-11-24'), [])
 
+    def test_data_is_consistent(self):
+        self.assertEqual(set(timetable.COURSES), set(timetable.DAY_NAMES))
+        self.assertTrue(set(timetable.DAY_NAMES) <= set(timetable.DAYS))
+        for start, end in timetable.GYM_SLOTS:
+            self.assertLess(start, end)
+        for day, items in timetable.COURSES.items():
+            self.assertEqual([i[0] for i in items], sorted(i[0] for i in items), day)
+            for start, end, title in items:
+                self.assertLess(start, end)
+                self.assertTrue(title)
+        self.assertLess(len(timetable.format_week()), 1000)  # un solo messaggio Telegram
+
+    def test_input_variants(self):
+        self.assertEqual(timetable.parse_times('OFF'), [])
+        self.assertEqual(timetable.parse_day('Fri'), 'FRI')
+        for bad in ('07:00,', ',07:00', '07:00, 12:30', '7:00', '07:00-09:00'):
+            with self.subTest(bad=bad), self.assertRaises(ValueError):
+                timetable.parse_times(bad)
+
+    def test_resolve_ignores_unknown_activities_and_malformed_entries(self):
+        prefs = {'MON': [{'activity': 'course', 'time': '13:00'}, {'activity': 'gym', 'time': '07:00'}, {}]}
+        self.assertEqual(timetable.resolve_times(prefs, '2026-11-23'), ['07:00'])
+
     def test_format_prefs(self):
         self.assertIn('orario predefinito', timetable.format_prefs(None))
         self.assertIn('non prenota', timetable.format_prefs({}))

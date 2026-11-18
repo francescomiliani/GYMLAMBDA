@@ -205,6 +205,10 @@ class ScheduledGuardTests(unittest.TestCase):
         self.set_state('skip#2026-04-05', {'skipped': False})
         self.assertEqual(self.call(), {'message': 'confirmed'})
 
+    def test_skip_of_another_date_does_not_block(self):
+        self.set_state('skip#2026-04-12', {'skipped': True})
+        self.assertEqual(self.call(), {'message': 'confirmed'})
+
     def test_last_run_write_failure_never_changes_the_outcome(self):
         original = self.client.put_item
 

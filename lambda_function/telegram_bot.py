@@ -809,9 +809,13 @@ def lambda_handler(event, context):
             _handle_callback(update, callback, token, str(sender['id']))
         else:
             _handle_message(message, token, str(sender['id']), update.get('update_id'))
-    except (ValueError, StoreConflict) as exc:
-        usage = str(exc).rstrip('. ') + '. ' if str(exc).startswith('Uso:') else ''
+    except ValueError as exc:
+        # I messaggi interni ("Invalid …") restano generici; gli altri sono per l'utente.
+        detail = str(exc).strip()
+        usage = detail.rstrip('. ') + '. ' if detail and not detail.startswith('Invalid') else ''
         _notify_failure(token, chat['id'], '⚠️ Richiesta non valida o scaduta. ' + usage + 'Riprova da /start.')
+    except StoreConflict:
+        _notify_failure(token, chat['id'], '⚠️ Richiesta non valida o scaduta. Riprova da /start.')
     except Exception:
         _notify_failure(token, chat['id'], '⚠️ Errore temporaneo, nessun tentativo automatico. '
                         'Riprova; se era una modifica verifica prima gli impegni con /bookings.')

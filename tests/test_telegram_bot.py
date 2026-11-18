@@ -473,6 +473,39 @@ class TelegramBotTests(unittest.TestCase):
             self.assertEqual(self.invoke(), 200)
             self.post.assert_not_called()
 
+    def test_prefs_input_variants(self):
+        with patch.object(telegram_bot, '_store') as factory:
+            create = factory.return_value.create_confirmation_once
+            create.return_value = 'opaque'
+            for text, expected in (('/prefs fri 18:15', {'action': 'prefs', 'day': 'FRI', 'times': ['18:15']}),
+                                   ('/prefs MON OFF', {'action': 'prefs', 'day': 'MON', 'times': []})):
+                self.message['text'] = text
+                self.assertEqual(self.invoke(), 200)
+                self.assertEqual(create.call_args.args[1], expected)
+            self.assertIn('nessuna prenotazione', self.last()['text'])
+            calls = create.call_count
+            for bad, reason in (('/prefs MON 07:00,07:00', 'Orari ammessi'),
+                                 ('/prefs MON 08:00,07:00', 'Orari ammessi'),
+                                 ('/prefs SAT 07:00', 'Giorno non valido'),
+                                 ('/prefs SUN off', 'Giorno non valido'),
+                                 ('/prefs MON 07:00, 12:30', 'Uso: /prefs')):
+                self.message['text'] = bad
+                self.assertEqual(self.invoke(), 200)
+                self.assertIn(reason, self.last()['text'], bad)
+                self.assertIn('Riprova da /start.', self.last()['text'])
+            self.assertEqual(create.call_count, calls)
+
+    def test_skip_today_is_allowed_but_yesterday_is_not(self):
+        with patch.object(telegram_bot, '_store') as factory:
+            create = factory.return_value.create_confirmation_once
+            create.return_value = 'opaque'
+            self.message['text'] = '/skip 2026-11-12'  # _today() è fissato al 2026-11-12
+            self.assertEqual(self.invoke(), 200)
+            self.assertEqual(create.call_count, 1)
+            self.message['text'] = '/skip 2026-11-11'
+            self.assertEqual(self.invoke(), 200)
+            self.assertEqual(create.call_count, 1)
+
     def test_next_run_with_no_matching_days_is_not_computable(self):
         zone = telegram_bot.ZoneInfo('Europe/Rome')
         now = datetime.datetime(2026, 11, 18, 10, 0, tzinfo=zone)
