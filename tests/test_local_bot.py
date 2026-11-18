@@ -163,6 +163,55 @@ class LocalBotTests(unittest.TestCase):
         book, _ = self.scheduled_run({'message': 'x'})
         self.assertEqual(book.call_args.args[1:], ('2026-11-16', ['18:15']))
 
+    def test_prefs_command_then_scheduled_run_end_to_end(self):
+        from datetime import datetime
+        from unittest.mock import patch
+        from zoneinfo import ZoneInfo
+        chat = {'id': 42, 'type': 'private'}
+        with patch('lambda_function.telegram_bot._send'), patch('lambda_function.telegram_bot._telegram'):
+            self.bot.handle({'update_id': 60, 'message': {'text': '/prefs MON 12:30,07:00', 'from': {'id': 42}, 'chat': chat}})
+            self.assertIsNone(self.store.get_state('prefs'))  # niente prima della conferma
+            token = self.store.get_update('60')['token']
+            callback = {'id': 'cb', 'data': token, 'from': {'id': 42}, 'message': {'chat': chat}}
+            self.bot.handle({'update_id': 61, 'callback_query': callback})
+            self.bot.handle({'update_id': 62, 'callback_query': callback})  # doppio click: nessun effetto
+        self.assertEqual([e['time'] for e in self.store.get_state('prefs')['MON']], ['12:30', '07:00'])
+        self.assertEqual(self.store.get_job(token)['status'], 'completed')
+        scheduler = self.bot.scheduler
+        scheduler.set_weekly_time(scheduler.get_schedule(), ['MON'], 8, 30)
+        scheduler.enable(scheduler.get_schedule())
+        rome = ZoneInfo('Europe/Rome')
+        self.bot.started = datetime(2026, 11, 9, 8, 0, tzinfo=rome)
+        result = {'time': '12:30', 'message': 'Prenotazione confermata con successo.'}
+        with patch('lambda_function.app.book', return_value=result) as book, \
+             patch('lambda_function.telegram_bot._send') as send:
+            self.bot.run_scheduled(datetime(2026, 11, 9, 8, 30, tzinfo=rome))
+        self.assertEqual(book.call_args.args[1:], ('2026-11-16', ['12:30', '07:00']))
+        self.assertIn('ore 12:30', send.call_args.args[2])
+
+    def test_skip_command_blocks_the_scheduled_run(self):
+        from datetime import datetime
+        from unittest.mock import patch
+        from zoneinfo import ZoneInfo
+        from lambda_function import telegram_bot
+        chat = {'id': 42, 'type': 'private'}
+        with patch('lambda_function.telegram_bot._send'), patch('lambda_function.telegram_bot._telegram'), \
+             patch.object(telegram_bot, '_today', return_value=datetime(2026, 11, 9).date()):
+            self.bot.handle({'update_id': 70, 'message': {'text': '/skip 2026-11-16', 'from': {'id': 42}, 'chat': chat}})
+            token = self.store.get_update('70')['token']
+            self.bot.handle({'update_id': 71, 'callback_query': {
+                'id': 'cb', 'data': token, 'from': {'id': 42}, 'message': {'chat': chat}}})
+        self.assertEqual(self.store.get_state('skip#2026-11-16'), {'skipped': True})
+        scheduler = self.bot.scheduler
+        scheduler.set_weekly_time(scheduler.get_schedule(), ['MON'], 8, 30)
+        scheduler.enable(scheduler.get_schedule())
+        rome = ZoneInfo('Europe/Rome')
+        self.bot.started = datetime(2026, 11, 9, 8, 0, tzinfo=rome)
+        with patch('lambda_function.app.book') as book, patch('lambda_function.telegram_bot._send'):
+            self.bot.run_scheduled(datetime(2026, 11, 9, 8, 30, tzinfo=rome))
+        book.assert_not_called()
+        self.assertEqual(self.store.get('scheduled#2026-11-09')['status'], 'skipped')
+
     def test_restart_warns_about_unfinished_scheduled_run(self):
         from unittest.mock import patch
         with self.store.db:

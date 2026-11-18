@@ -1,3 +1,4 @@
+import datetime
 import json
 import time
 import unittest
@@ -157,6 +158,61 @@ class BotIntegrationTests(unittest.TestCase):
         self.assertEqual(telegram_worker.lambda_handler(self.queue[0], None), {'status': 'already_claimed'})
         self.client.book.assert_called_once()
         self.assertEqual(self.store.get_job(token)['status'], 'completed')
+
+    # --- preferenze e skip con lo store reale ---------------------------------
+    def command(self, text, update_id, user=42):
+        return self.webhook({'update_id': update_id, 'message': {
+            'from': {'id': user}, 'chat': {'id': user, 'type': 'private'}, 'text': text}})
+
+    def last_text(self):
+        return self.messages[-1][1]['text']
+
+    def last_token(self):
+        return self.messages[-1][1]['reply_markup']['inline_keyboard'][0][0]['callback_data']
+
+    def test_prefs_flow_persists_in_store_and_replay_does_not_overwrite(self):
+        from lambda_function import timetable
+        self.assertEqual(self.command('/prefs mon 12:30,07:00', 31)['statusCode'], 200)
+        self.assertIsNone(self.store.get_state('prefs'))  # nulla prima della conferma
+        token = self.last_token()
+        self.assertEqual(self.callback(token, 32)['statusCode'], 200)
+        self.assertIn('Preferenze aggiornate', self.last_text())
+        # la guardia legge lo stesso stato: lunedì 2026-11-23, prima le 12:30 poi le 07:00
+        self.assertEqual(timetable.resolve_times(self.store.get_state('prefs'), '2026-11-23'), ['12:30', '07:00'])
+        self.assertEqual(self.store.get_job(token)['status'], 'completed')
+        # una modifica successiva non viene annullata dal replay del vecchio bottone
+        self.store.put_state('prefs', timetable.set_day(None, 'TUE', ['18:15']))
+        self.assertEqual(self.callback(token, 33)['statusCode'], 200)
+        self.assertEqual(list(self.store.get_state('prefs')), ['TUE'])
+        # MON off su un giorno non presente e poi su TUE: il giorno viene tolto, il resto resta
+        self.command('/prefs TUE off', 34)
+        self.callback(self.last_token(), 35)
+        self.assertEqual(self.store.get_state('prefs'), {})
+        self.command('/prefs', 36)
+        self.assertIn('non prenota', self.last_text())
+
+    def test_skip_flow_sets_and_clears_with_ttl(self):
+        date = (telegram_bot._today() + datetime.timedelta(days=3)).isoformat()
+        self.command('/skip ' + date, 41)
+        self.assertIsNone(self.store.get_state('skip#' + date))
+        self.callback(self.last_token(), 42)
+        self.assertEqual(self.store.get_state('skip#' + date), {'skipped': True})
+        self.assertEqual(self.db.items['state#skip#' + date]['purge_at'], self.now + 30 * 86400)
+        self.command('/skip off ' + date, 43)
+        self.callback(self.last_token(), 44)
+        self.assertEqual(self.store.get_state('skip#' + date), {'skipped': False})
+
+    def test_prefs_confirmation_expires_and_other_users_cannot_change_state(self):
+        self.command('/prefs MON 07:00', 51)
+        token = self.last_token()
+        self.assertEqual(self.callback(token, 52, user=99)['statusCode'], 403)
+        self.now += 301
+        self.assertEqual(self.callback(token, 53)['statusCode'], 200)
+        self.assertTrue(any('scaduta' in payload.get('text', '') for _, payload in self.messages))
+        self.assertIsNone(self.store.get_state('prefs'))
+        before = dict(self.db.items)
+        self.assertEqual(self.command('/prefs MON off', 54, user=99)['statusCode'], 403)
+        self.assertEqual(self.db.items, before)
 
     def test_expired_confirmation_and_wrong_user_do_not_execute(self):
         token = self.confirmation()

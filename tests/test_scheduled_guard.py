@@ -60,6 +60,88 @@ class FakeDynamo:
         self.items[key]['status'] = ExpressionAttributeValues[':s']
 
 
+REAL_HANDLER = guard.app.lambda_handler  # prima che i test lo sostituiscano
+
+
+class GuardWithRealBookingTests(unittest.TestCase):
+    """Guardia + app.book reali: solo la sessione HTTP del portale è simulata."""
+
+    def setUp(self):
+        self.client = FakeDynamo()
+        modules = {'boto3': types.SimpleNamespace(client=Mock(return_value=self.client)),
+                   'boto3.dynamodb': types.ModuleType('boto3.dynamodb'),
+                   'boto3.dynamodb.types': boto3.dynamodb.types,
+                   'botocore': types.ModuleType('botocore'),
+                   'botocore.exceptions': botocore.exceptions,
+                   'botocore.config': types.SimpleNamespace(Config=Mock(side_effect=lambda **kw: kw))}
+        self.enterContext(patch.dict(sys.modules, modules))
+        self.enterContext(patch.dict(os.environ, {'BOT_SCHEDULE_ARN': ARN, 'BOT_TABLE_NAME': 'table',
+                                                  'BOT_BOOKING_TIME': '18:15',
+                                                  'SPORTRICK_USERNAME': 'user', 'SPORTRICK_PASSWORD': 'pass'}, clear=True))
+        clock = self.enterContext(patch.object(guard.datetime, 'datetime', wraps=datetime.datetime))
+        clock.now.return_value = NOW
+        self.event = {'schedule_arn': ARN, 'scheduled_time': '2026-03-29T00:30:00Z'}  # lezione: dom 2026-04-05
+
+    def run_guard(self, slots, prefs, booking_message='Prenotazione confermata con successo.'):
+        from unittest.mock import MagicMock
+        from test_app import session_with_login, successful_login
+        login, activity, booking = (MagicMock() for _ in range(3))
+        successful_login(login)
+        activity.json.return_value = {'data': slots}
+        booking.json.return_value = {'message': booking_message}
+        session = session_with_login()
+        session.post.side_effect = [login, activity, booking]
+        if prefs is not None:
+            guard_store(self.client, 'table').put_state('prefs', prefs)
+        with patch.object(guard.app.requests, 'Session') as factory, patch('builtins.print'):
+            factory.return_value.__enter__.return_value = session
+            try:
+                return guard.lambda_handler(self.event, None), session
+            except RuntimeError as error:
+                return error, session
+
+    def sunday(self, *times):
+        return {'SUN': [{'activity': 'gym', 'time': item} for item in times]}
+
+    def test_first_choice_full_books_second_choice(self):
+        slots = [{'TimeStart': '07:00', 'AppointmentId': 'full', 'Notes': 'Lezione al completo.'},
+                 {'TimeStart': '12:30', 'AppointmentId': 'free', 'Notes': 'Prenota'},
+                 {'TimeStart': '18:15', 'AppointmentId': 'late', 'Notes': 'Prenota'}]
+        result, session = self.run_guard(slots, self.sunday('07:00', '12:30', '18:15'))
+        self.assertEqual(result['time'], '12:30')
+        self.assertEqual(session.post.call_args_list[2].kwargs['data'], {'appointmentID': 'free'})
+        self.assertEqual(session.post.call_count, 3)  # un solo BookAppointment
+
+    def test_first_choice_available_never_tries_the_others(self):
+        slots = [{'TimeStart': '07:00', 'AppointmentId': 'first', 'Notes': 'Prenota'},
+                 {'TimeStart': '12:30', 'AppointmentId': 'second', 'Notes': 'Prenota'}]
+        result, session = self.run_guard(slots, self.sunday('07:00', '12:30'))
+        self.assertEqual(result['time'], '07:00')
+        self.assertEqual(session.post.call_args_list[2].kwargs['data'], {'appointmentID': 'first'})
+
+    def test_nothing_bookable_sends_no_booking_request(self):
+        slots = [{'TimeStart': '07:00', 'AppointmentId': 'a', 'Notes': 'Lezione al completo.'},
+                 {'TimeStart': '12:30', 'AppointmentId': 'b', 'Notes': 'Lezione al completo.'}]
+        error, session = self.run_guard(slots, self.sunday('07:00', '12:30'))
+        self.assertIsInstance(error, RuntimeError)
+        self.assertIn('non prenotabile', str(error))
+        self.assertEqual(session.post.call_count, 2)  # login + calendario, mai BookAppointment
+        claims = [item for (_, pk), item in self.client.items.items() if pk.startswith('schedule#')]
+        self.assertEqual(claims[0]['status'], {'S': 'uncertain'})  # nessun ritentativo automatico
+
+    def test_no_preferences_keeps_legacy_default_time(self):
+        slots = [{'TimeStart': '18:15', 'AppointmentId': 'legacy', 'Notes': 'Prenota'}]
+        result, session = self.run_guard(slots, None)
+        self.assertEqual(result['time'], '18:15')
+
+    def test_weekday_without_preference_never_opens_a_session(self):
+        guard_store(self.client, 'table').put_state('prefs', {'MON': [{'activity': 'gym', 'time': '07:00'}]})
+        with patch.object(guard.app.requests, 'Session') as factory:
+            result = guard.lambda_handler(self.event, None)
+        self.assertEqual(result['status'], 'skipped')
+        factory.assert_not_called()
+
+
 class ScheduledGuardTests(unittest.TestCase):
     def setUp(self):
         self.client = FakeDynamo()

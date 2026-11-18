@@ -14,48 +14,6 @@ def error(code, reasons=None):
     return ClientError(response, 'test')
 
 
-class OverwritingDynamo:
-    """put_item without a condition overwrites, as DynamoDB does."""
-    def __init__(self):
-        self.items = {}
-        self.serializer = TypeSerializer()
-        self.deserializer = TypeDeserializer()
-
-    def put_item(self, **kwargs):
-        assert 'ConditionExpression' not in kwargs
-        item = {k: self.deserializer.deserialize(v) for k, v in kwargs['Item'].items()}
-        self.items[item['pk']] = item
-
-    def get_item(self, **kwargs):
-        assert kwargs['ConsistentRead'] is True
-        pk = self.deserializer.deserialize(kwargs['Key']['pk'])
-        item = self.items.get(pk)
-        return {'Item': {k: self.serializer.serialize(v) for k, v in item.items()}} if item else {}
-
-
-class StateTests(unittest.TestCase):
-    def test_state_round_trip_overwrites_and_missing_is_none(self):
-        client = OverwritingDynamo()
-        store = BotStore(client, 'table')
-        self.assertIsNone(store.get_state('prefs'))
-        store.put_state('prefs', {'MON': [{'activity': 'gym', 'time': '07:00'}]})
-        store.put_state('prefs', {'TUE': []})
-        self.assertEqual(store.get_state('prefs'), {'TUE': []})
-        self.assertNotIn('purge_at', client.items['state#prefs'])  # le preferenze non scadono
-
-    def test_state_with_purge_at_expires_through_ttl_attribute(self):
-        client = OverwritingDynamo()
-        store = BotStore(client, 'table')
-        store.put_state('skip#2026-11-20', {'skipped': True}, purge_at=1_800_000_000.7)
-        self.assertEqual(client.items['state#skip#2026-11-20']['purge_at'], 1_800_000_000)
-        self.assertEqual(store.get_state('skip#2026-11-20'), {'skipped': True})
-
-    def test_state_keys_do_not_collide_with_confirmations_or_jobs(self):
-        client = OverwritingDynamo()
-        BotStore(client, 'table').put_state('x', {'a': 1})
-        self.assertEqual(list(client.items), ['state#x'])
-
-
 class FakeDynamo:
     def __init__(self):
         self.items = {}
@@ -71,7 +29,7 @@ class FakeDynamo:
 
     def put_item(self, **kwargs):
         item = self.dec(kwargs['Item'])
-        if item['pk'] in self.items:
+        if 'ConditionExpression' in kwargs and item['pk'] in self.items:
             raise error('ConditionalCheckFailedException')
         self.items[item['pk']] = item
 
@@ -239,6 +197,29 @@ class StoreTests(unittest.TestCase):
             self.db.transact_write_items = Mock(side_effect=error('TransactionCanceledException', reasons))
             with self.assertRaises(ClientError):
                 self.store.create_confirmation_once('user', {}, 110, 'command')
+
+
+class StateTests(unittest.TestCase):
+    def test_state_round_trip_overwrites_and_missing_is_none(self):
+        client = FakeDynamo()
+        store = BotStore(client, 'table')
+        self.assertIsNone(store.get_state('prefs'))
+        store.put_state('prefs', {'MON': [{'activity': 'gym', 'time': '07:00'}]})
+        store.put_state('prefs', {'TUE': []})
+        self.assertEqual(store.get_state('prefs'), {'TUE': []})
+        self.assertNotIn('purge_at', client.items['state#prefs'])  # le preferenze non scadono
+
+    def test_state_with_purge_at_expires_through_ttl_attribute(self):
+        client = FakeDynamo()
+        store = BotStore(client, 'table')
+        store.put_state('skip#2026-11-20', {'skipped': True}, purge_at=1_800_000_000.7)
+        self.assertEqual(client.items['state#skip#2026-11-20']['purge_at'], 1_800_000_000)
+        self.assertEqual(store.get_state('skip#2026-11-20'), {'skipped': True})
+
+    def test_state_keys_do_not_collide_with_confirmations_or_jobs(self):
+        client = FakeDynamo()
+        BotStore(client, 'table').put_state('x', {'a': 1})
+        self.assertEqual(list(client.items), ['state#x'])
 
 
 if __name__ == '__main__':
