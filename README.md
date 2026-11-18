@@ -3,13 +3,10 @@
 Client Python e Lambda per consultare corsi e impegni sul portale Sportrick
 (`replywellnessTO`), prenotare e cancellare lezioni e inviare notifiche email e Telegram.
 
-**Stato:** le nuove azioni sono distribuite sulla Lambda; le variabili per email SNS e
-Telegram sono configurate. La pianificazione rimane disattivata.
-
-La pianificazione è **disattivata** dall'11/11/2026. Quando abilitata gira lunedì,
-mercoledì e venerdì alle 07:00 (ora di Roma) e prenota la lezione delle 07:00 **7 giorni
-dopo**; la funzione si può anche invocare a mano con data e orario.
-**Ogni invocazione con payload di prenotazione prenota davvero.**
+**Stato:** la schedule `gym-booking-mwf-0700` è accesa dal 18/11/2026. Il lunedì a
+mezzanotte (ora di Roma) prenota la sala attrezzi delle 07:00 di lunedì, mercoledì e
+venerdì di quella settimana. Il target è la versione 1 del guard del bot, non la Lambda
+legacy. **Ogni invocazione con payload di prenotazione prenota davvero.**
 
 ## Risorse in esercizio
 
@@ -17,7 +14,7 @@ dopo**; la funzione si può anche invocare a mano con data e orario.
 |---|---|
 | Funzione | `GymBooking-personale`, `eu-north-1` (Stoccolma), Python 3.12, 128 MB, timeout 60 s |
 | Ruolo Lambda | `GymBooking-personale-lambda-role` (log + `sns:Publish`) |
-| Schedule | `gym-booking-mwf-0700` — `DISABLED`, `cron(0 7 ? * MON,WED,FRI *)`, `Europe/Rome`, finestra `OFF` |
+| Schedule | `gym-booking-mwf-0700`, `ENABLED` dal 18/11/2026, `cron(0 0 ? * MON *)`, `Europe/Rome`, finestra `OFF`, target guard versione 1 |
 | Topic notifiche | `arn:aws:sns:eu-north-1:163876584948:GymBooking-notifiche` |
 | Variabili d'ambiente | `SPORTRICK_USERNAME`, `SPORTRICK_PASSWORD`, `SNS_TOPIC_ARN`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID` |
 | Prenotazioni verificate l'11/11/2026 | mar 17 e mer 18 novembre 2026, 07:00 |
@@ -37,8 +34,7 @@ SSM Parameter Store (`/gymbot/*`, SecureString). Pacchetto: `python3 scripts/bui
 poi `sam build/deploy` con Python 3.12. Rollback: `deleteWebhook` su Telegram e
 `aws cloudformation delete-stack --stack-name gymbot-telegram`. La concorrenza riservata del
 webhook non è utilizzabile (limite account): modifiche schedule concorrenti non sono serializzate.
-La schedule `gym-booking-mwf-0700` resta `DISABLED` e punta a `scheduled_guard`. Un deploy
-richiede un'approvazione esplicita e non riattiva la schedule né tocca `GymBooking-personale`.
+La schedule `gym-booking-mwf-0700` è `ENABLED` dal 18/11/2026: lunedì a mezzanotte (ora di Roma) prenota la sala attrezzi delle 07:00 di lunedì, mercoledì e venerdì di quella settimana. Il trigger punta alla versione 1 del guard, con retry 0. `/enable` dal bot resta bloccato. Un deploy richiede un'approvazione esplicita e non tocca `GymBooking-personale`.
 
 Il menu consente di consultare attività e impegni, scegliere giorno e lezione e
 confermare le operazioni; sono disponibili anche comandi testuali in `/help`. Le
@@ -281,13 +277,14 @@ significano tre tentativi. Prima di aggiungerne altre va resa idempotente.
 | Voce | Valore |
 |---|---|
 | Nome | `gym-booking-mwf-0700` |
-| Stato | `DISABLED` dall'11/11/2026 |
-| Espressione | `cron(0 7 ? * MON,WED,FRI *)` |
+| Stato | `ENABLED` dal 18/11/2026 |
+| Espressione | `cron(0 0 ? * MON *)` |
 | Fuso | `Europe/Rome` (DST gestito da AWS) |
 | Finestra | `FlexibleTimeWindow: OFF` |
-| Payload | `{"time":"07:00"}` → prenota le 07:00 a +7 giorni |
-| Ruolo | `GymBooking-personale-scheduler-role` (policy inline `InvokeGymBooking`) |
-| Retry Scheduler | fino a 185 tentativi di consegna entro 86.400 secondi, rilevati l'11/11/2026 |
+| Target | versione 1 di `scheduled_guard` |
+| Effetto | lunedì, mercoledì e venerdì della stessa settimana, sala attrezzi alle 07:00 |
+| Ruolo | `GymBooking-personale-scheduler-role` |
+| Retry | scheduler 0 entro 60 secondi; Lambda versione 1 retry 0 |
 
 I retry di Scheduler riguardano la **consegna dell'evento**. Lambda gestisce separatamente i
 retry delle invocazioni asincrone; in assenza di configurazione dedicata può riprovare due

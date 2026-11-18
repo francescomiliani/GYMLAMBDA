@@ -235,7 +235,7 @@ nel bot: non premerla al posto dell'utente.
   e HTTP 200. Non ritentare l'update: un 4xx bloccherebbe la coda Telegram.
 - I corsi sono nel modello (`activity` per voce) ma oggi le preferenze accettano solo la sala
   attrezzi. Per prenotare un corso usare il flusso HTTP di questa skill, con conferma.
-- La schedule è `DISABLED` e `/enable` è bloccato (ADR 0002). Non riattivarla.
+- La schedule `gym-booking-mwf-0700` è `ENABLED` dal 2026-11-18: lunedì a mezzanotte (Europe/Rome) prenota le 07:00 di lunedì, mercoledì e venerdì di quella settimana. `/enable` dal bot resta bloccato (ADR 0002). Giorni e ora si cambiano solo a schedule `DISABLED`. Non disattivarla e non cambiare l'espressione senza una richiesta esplicita.
 - `/calendar` allinea gli impegni futuri (non i servizi, non la lista d'attesa) su Google Calendar.
   Prima la scrittura diretta, con promemoria a 12 ore e a 1 ora. Il file `.ics` parte solo se manca
   `~/.config/gymbooking/google-calendar.json` o se Google rifiuta la chiamata. Non importare il file

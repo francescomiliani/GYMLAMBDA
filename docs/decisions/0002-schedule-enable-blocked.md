@@ -18,10 +18,11 @@ legacy `GymBooking-personale` non e' idempotente: una riattivazione puo' produrr
 prenotazioni duplicate. La guardia `scheduled_guard` rende un'occorrenza
 at-most-once.
 
-Dal 2026-11-12 la schedule, sempre `DISABLED`, punta al guard con retry 0.
-`/enable` resta bloccato: mancano la versione immutabile del guard, i retry
-Lambda a 0 e un'autorizzazione esplicita. Nessun controllo runtime dimostra
-ancora IAM, retry Lambda e codice effettivo end to end.
+Dal 2026-11-12 la schedule punta al guard con retry 0. Il 2026-11-18, con
+autorizzazione esplicita, è stata accesa: `cron(0 0 ? * MON *)` in `Europe/Rome`,
+target la versione 1 del guard, retry Lambda 0, età massima 60 secondi. Un
+lunedì a mezzanotte prenota le 07:00 di lunedì, mercoledì e venerdì di quella
+settimana. `/enable` dal bot resta bloccato.
 
 ## Decisione
 

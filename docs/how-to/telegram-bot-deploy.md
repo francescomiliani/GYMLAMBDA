@@ -56,7 +56,8 @@ Non impostare `ReservedConcurrentExecutions`: il limite dell'account lo rifiuta.
 In un aggiornamento conserva i parametri già presenti, incluso `GoogleCalendarParameterName`.
 Un valore vuoto (`SnsTopicArn`) si passa solo come `ParameterKey=SnsTopicArn,ParameterValue=`:
 la forma `SnsTopicArn=` viene rifiutata. Non stampare i valori. Lo stack è stato aggiornato
-il 2026-11-18 (`UPDATE_COMPLETE`); la schedule è rimasta `DISABLED`.
+il 2026-11-18 (`UPDATE_COMPLETE`). La schedule, dopo quel deploy, è stata accesa
+a parte: vedi la sezione sotto. Non la spegne un aggiornamento dello stack.
 
 ## 4. Telegram
 
@@ -75,7 +76,7 @@ il 2026-11-18 (`UPDATE_COMPLETE`); la schedule è rimasta `DISABLED`.
 - POST senza secret alla URL: 403. GET: 405.
 - Su Telegram: `/start`, poi `/bookings`, `/automation`, `/orari` e `/status` (sola lettura). Dopo un deploy controllare con `getWebhookInfo` che `pending_update_count` sia 0 e che non ci sia un `last_error` recente.
 - Log in CloudWatch `/aws/lambda/gymbot-telegram-*`.
-- Schedule ancora `DISABLED`.
+- Schedule `gym-booking-mwf-0700`: `ENABLED`, `cron(0 0 ? * MON *)`, `Europe/Rome`, target la versione 1 del guard, retry 0.
 
 ## Rollback
 
@@ -87,8 +88,9 @@ La Lambda legacy non viene toccata. Dal 2026-11-12 la schedule punta al guard (v
 
 ## Migrazione schedule al guard (2026-11-12)
 
-La schedule `gym-booking-mwf-0700` (sempre `DISABLED`) ora invoca `scheduled_guard`
-invece della Lambda legacy `GymBooking-personale`:
+La schedule `gym-booking-mwf-0700` dal 2026-11-12 invoca `scheduled_guard`
+invece della Lambda legacy `GymBooking-personale`. Dal 2026-11-18 è `ENABLED`,
+`cron(0 0 ? * MON *)` in `Europe/Rome`, target la versione 1 del guard:
 
 - Payload `{"schedule_arn": <arn>, "scheduled_time": "<aws.scheduler.scheduled-time>"}`.
 - Retry 0, `MaximumEventAgeInSeconds` 60 (prima 185 retry / 86400 s).
@@ -96,7 +98,7 @@ invece della Lambda legacy `GymBooking-personale`:
 - Ruolo scheduler: aggiunta la policy inline `InvokeGymBookingGuard`; la vecchia
   `InvokeGymBooking` e' stata lasciata come backup per il rollback.
 - La Lambda legacy resta deployata e invocabile direttamente.
-- L'orario è la preferenza del giorno (`/prefs`). Senza preferenze salvate usa `BookingTime` (default 07:00), a +7 giorni dalla data schedulata. Un giorno senza preferenza, o una data in `/skip`, non prenota.
+- Il lunedì a mezzanotte prenota lunedì, mercoledì e venerdì di quella settimana all'orario in `/prefs` (dal 2026-11-18: 07:00). Senza preferenze salvate usa `BookingTime`. Una data in `/skip`, o un giorno tolto dalle preferenze, non si prenota.
 
 Rollback della sola schedule (lasciarla `DISABLED`): `update-schedule` con target
 `arn:aws:lambda:eu-north-1:163876584948:function:GymBooking-personale`, `Input`

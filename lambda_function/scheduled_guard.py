@@ -19,6 +19,18 @@ TIMESTAMP = re.compile(r'\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?(?:Z|[
 TIME = re.compile(r'(?:[01]\d|2[0-3]):[0-5]\d\Z')
 
 
+def class_dates(scheduled):
+    """Class days for this occurrence.
+
+    Monday at 00:00 Europe/Rome books Monday, Wednesday and Friday of that week.
+    Any other fire keeps the previous rule: the same weekday seven days later.
+    """
+    local = scheduled.astimezone(ZoneInfo('Europe/Rome'))
+    if local.weekday() == 0 and local.hour == 0 and local.minute == 0:
+        return [local.date() + datetime.timedelta(days=offset) for offset in (0, 2, 4)]
+    return [local.date() + datetime.timedelta(days=7)]
+
+
 def lambda_handler(event, context):
     expected = os.environ.get('BOT_SCHEDULE_ARN', '')
     table = os.environ.get('BOT_TABLE_NAME', '')
@@ -48,7 +60,7 @@ def lambda_handler(event, context):
         raise RuntimeError('Sportrick credentials are not configured')
 
     key = 'schedule#' + hashlib.sha256((arn + '\n' + scheduled.isoformat()).encode()).hexdigest()
-    date = (scheduled.astimezone(ZoneInfo('Europe/Rome')).date() + datetime.timedelta(days=7)).isoformat()
+    dates = [day.isoformat() for day in class_dates(scheduled)]
     import boto3
     from botocore.config import Config
     client = boto3.client('dynamodb', config=Config(connect_timeout=2, read_timeout=3,
@@ -60,11 +72,19 @@ def lambda_handler(event, context):
     else:
         from bot_store import BotStore
     state = BotStore(client, table)
-    if (state.get_state('skip#' + date) or {}).get('skipped'):
-        return {'status': 'skipped', 'reason': 'date skipped'}
-    times = timetable.resolve_times(state.get_state('prefs'), date, time)
-    if not times:
-        return {'status': 'skipped', 'reason': 'no preference for this weekday'}
+    plans = []
+    for date in dates:
+        if (state.get_state('skip#' + date) or {}).get('skipped'):
+            continue
+        times = timetable.resolve_times(state.get_state('prefs'), date, time)
+        if times:
+            plans.append((date, times))
+    if not plans:
+        if len(dates) == 1 and (state.get_state('skip#' + dates[0]) or {}).get('skipped'):
+            return {'status': 'skipped', 'reason': 'date skipped'}
+        if len(dates) == 1:
+            return {'status': 'skipped', 'reason': 'no preference for this weekday'}
+        return {'status': 'skipped', 'reason': 'nothing to book'}
     try:
         client.put_item(TableName=table, Item={
             'pk': {'S': key}, 'status': {'S': 'claimed'}, 'started': {'N': str(int(now.timestamp()))},
@@ -86,22 +106,34 @@ def lambda_handler(event, context):
     def last_run(status):
         try:  # solo per /status: non deve mai influire sull'esito
             state.put_state('last_run', {'at': now.astimezone(ZoneInfo('Europe/Rome')).strftime('%d/%m %H:%M'),
-                                         'date': date, 'status': status})
+                                         'date': ', '.join(date for date, _ in plans), 'status': status})
         except Exception:
             pass
 
-    event = {'date': date, 'time': times[0]}
-    if len(times) > 1:
-        event['fallback_times'] = times[1:]
-    try:
-        result = app.lambda_handler(event, context)
-    except Exception:
+    results = []
+    for date, times in plans:
+        event = {'date': date, 'time': times[0]}
+        if len(times) > 1:
+            event['fallback_times'] = times[1:]
         try:
-            record('uncertain')
+            results.append(app.lambda_handler(event, context))
+        except RuntimeError:
+            # Una data sola resta incerta, come prima. Con tre date uno slot chiuso non blocca le altre.
+            if len(plans) == 1:
+                try:
+                    record('uncertain')
+                except Exception:
+                    pass
+                last_run('uncertain')
+                raise
+            results.append({'date': date, 'status': 'rejected'})
         except Exception:
-            pass
-        last_run('uncertain')
-        raise
+            try:
+                record('uncertain')
+            except Exception:
+                pass
+            last_run('uncertain')
+            raise
     record('completed')
     last_run('completed')
-    return result
+    return results[0] if len(results) == 1 else {'status': 'completed', 'results': results}

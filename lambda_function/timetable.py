@@ -4,8 +4,9 @@ Fonte degli orari: foto ufficiale in docs/reference/orari-palestra-2026-11.png
 (verificata il 2026-11-18). Gli orari reali e la disponibilità restano quelli del
 portale: questi dati servono per orientarsi e per validare le preferenze.
 
-Le preferenze sono per giorno della *lezione* (la data prenotata è sempre a sette
-giorni dall'esecuzione, quindi giorno di esecuzione e giorno della lezione coincidono).
+Le preferenze sono per giorno della lezione. Il trigger del lunedì a mezzanotte
+prenota lunedì, mercoledì e venerdì di quella settimana; gli altri trigger
+prenotano lo stesso giorno sette giorni dopo.
 """
 import datetime
 

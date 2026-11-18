@@ -55,16 +55,16 @@ verificare prima di operare.
 |---|---|
 | Lambda webhook (`telegram_bot`) | Function URL pubblica `AuthType: NONE`. Verifica secret e utente autorizzato, registra conferme, accoda lavoro. Risponde 403 senza secret, 405 su GET. |
 | Lambda worker (`telegram_worker`) | Esegue letture e mutazioni in modo asincrono, notifica l'esito. Timeout 180 s, retry asincroni 0. |
-| Lambda guardia (`scheduled_guard`) | Distribuita ma non e' il target della schedule. At-most-once per occorrenza. |
+| Lambda guardia (`scheduled_guard`) | Target della schedule, versione 1. At-most-once per occorrenza. |
 | DynamoDB | Una tabella provisioned 1 RCU / 1 WCU, TTL su `purge_at`. Conferme, deduplica, stato dei job. |
-| SSM Parameter Store | Quattro `SecureString` Standard `/gymbot/*`, chiave AWS managed `alias/aws/ssm`, lette a runtime da `ssm_config.get_secret`. |
+| SSM Parameter Store | Cinque `SecureString` Standard `/gymbot/*`, chiave AWS managed `alias/aws/ssm`, lette a runtime da `ssm_config.get_secret`. |
 | CloudWatch Logs | Un log group per funzione, retention 7 giorni. |
 | S3 | Bucket creato da SAM (`--resolve-s3`) solo per i pacchetti di deploy. |
 | IAM | Ruoli dedicati. `ssm:GetParameter` sugli ARN esatti, DynamoDB limitato alla tabella. |
 
 Risorse preesistenti, non gestite dallo stack: Lambda `GymBooking-personale`
-(legacy, non idempotente) e schedule `gym-booking-mwf-0700` (`DISABLED`, fino a 185
-retry di consegna dello Scheduler).
+(legacy, non idempotente) e schedule `gym-booking-mwf-0700` (`ENABLED` dal
+2026-11-18, retry di consegna 0, target la versione 1 del guard).
 
 ## Invarianti
 
@@ -89,8 +89,9 @@ Dati nella stessa tabella DynamoDB (`state#prefs`, `state#skip#DATA`, `state#las
 
 - `/prefs` mostra, `/prefs MON 07:00,12:30` imposta (con conferma), `/prefs MON off` toglie il giorno.
   Gli orari sono quelli della sala attrezzi (`timetable.GYM_SLOTS`) in ordine di priorita': prima
-  le 07:00, poi le 12:30. Il giorno e' quello della lezione; la lezione prenotata e' sempre a sette
-  giorni dall'esecuzione, quindi coincide con il giorno di esecuzione.
+  le 07:00, poi le 12:30. Il giorno e' quello della lezione. Il lunedì a mezzanotte
+  prenota tre date di quella settimana; gli altri trigger prenotano lo stesso giorno
+  sette giorni dopo.
 - `scheduled_guard` legge le preferenze prima del claim e chiama `app.book` con la lista ordinata
   (`fallback_times`): vale il primo slot con `Notes == 'Prenota'`, senza POST su slot non prenotabili.
   Giorno senza preferenze (con preferenze presenti) oppure data in `/skip`: nessuna prenotazione e
@@ -102,7 +103,7 @@ Dati nella stessa tabella DynamoDB (`state#prefs`, `state#skip#DATA`, `state#las
 - Il corso (sala corsi) e' previsto nel modello (`activity` per voce) ma oggi le preferenze validano
   solo la sala attrezzi.
 
-Sezione verificata sul codice e sui test il 2026-11-18. Lo stesso giorno lo stack `gymbot-telegram` è in `UPDATE_COMPLETE` e la schedule `gym-booking-mwf-0700` resta `DISABLED` sul guard.
+Sezione verificata sul codice e sui test il 2026-11-18. Lo stesso giorno lo stack `gymbot-telegram` è in `UPDATE_COMPLETE` e la schedule `gym-booking-mwf-0700` è `ENABLED` sulla versione 1 del guard.
 
 ## Calendario
 
@@ -134,9 +135,15 @@ Sezione verificata sul codice, sui test e sul parametro SSM il 2026-11-18.
 
 ## Schedule
 
-La schedule `gym-booking-mwf-0700` è `DISABLED` e dal 2026-11-12 invoca
-`scheduled_guard` con retry 0. Il bot puo' consultarla e disattivarla. Giorni e
-ora si modificano solo a schedule `DISABLED`. `/enable` resta bloccato: vedi
+Dal 2026-11-18 `gym-booking-mwf-0700` è `ENABLED`. Espressione `cron(0 0 ? * MON *)`,
+fuso `Europe/Rome`: il lunedì a mezzanotte prenota la sala attrezzi delle 07:00 di
+lunedì, mercoledì e venerdì di quella stessa settimana. Il portale non accetta
+prenotazioni a nove giorni, quindi un solo trigger settimanale non può prendere
+il lunedì, il mercoledì e il venerdì della settimana dopo.
+
+Il target è la versione 1 di `scheduled_guard` (non `$LATEST`). Retry dello
+scheduler e della Lambda: 0. Età massima dell'evento: 60 secondi. Il bot puo'
+consultare e disattivare la schedule. `/enable` dal bot resta bloccato: vedi
 `docs/decisions/0002-schedule-enable-blocked.md`. `BotScheduler.enable()` esiste
 ma non e' collegato.
 
