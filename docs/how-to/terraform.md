@@ -15,9 +15,11 @@ relevant-code:
 
 # Manage the AWS environment with Terraform
 
-Stato: **draft**. Dal 2026-11-19 Terraform gestisce 31 risorse (passi 1-3 e 5 della migrazione fatti, `plan`
-senza modifiche). Lo stack SAM `gymbot-telegram` e' ancora attivo (passi 4, 6 e 7 da fare, dopo aver visto girare il
-guard): finche' non e' dismesso, `docs/how-to/telegram-bot-deploy.md` descrive ancora il deploy del codice.
+Stato: **draft**. Dal 2026-11-19 Terraform gestisce 31 risorse (passi 1-5 della migrazione fatti, `plan`
+senza modifiche). Il passo 4 e' fatto: dal 2026-11-19 le 15 risorse dello stack hanno `DeletionPolicy` e
+`UpdateReplacePolicy` `Retain` (change set dal template gia' distribuito, senza `sam deploy`, per non ricaricare il codice).
+Lo stack SAM `gymbot-telegram` e' ancora attivo: restano i passi 6 e 7, da fare dopo aver visto girare il
+guard versione 3 (primo giro utile: mezzanotte del 2026-11-20): finche' non e' dismesso, `docs/how-to/telegram-bot-deploy.md` descrive ancora il deploy del codice.
 Ogni comando che modifica AWS richiede l'autorizzazione esplicita dell'utente.
 
 ## Lezioni dalla migrazione del 2026-11-19
@@ -48,7 +50,7 @@ email, schedule `gym-booking-mwf-0700` con il suo ruolo. **Non** gestisce i cinq
 
 | Percorso | Contenuto |
 |---|---|
-| `infra/bootstrap/` | Crea il bucket S3 dello state (versioning, SSE, accesso pubblico bloccato). State locale. |
+| `infra/bootstrap/` | Crea il bucket S3 dello state (versioning, SSE, accesso pubblico bloccato). Il suo state sta nello stesso bucket (`gymbooking/bootstrap.tfstate`, migrato il 2026-11-19). |
 | `infra/terraform/` | Configurazione principale. State in S3 con `use_lockfile`. |
 | `infra/scripts/inventory.sh` | Sola lettura: elenca ID fisici, policy e permessi da copiare in `terraform.tfvars`. |
 | `infra/scripts/tf.sh` | Costruisce i pacchetti Lambda e lancia `terraform` con profilo e regione fissi. |
@@ -60,7 +62,7 @@ email, schedule `gym-booking-mwf-0700` con il suo ruolo. **Non** gestisce i cinq
 
 ## Migrazione dall'ambiente esistente
 
-1. Bootstrap: `terraform -chdir=infra/bootstrap init && terraform -chdir=infra/bootstrap apply`.
+1. Bootstrap: con il backend S3 commentato, `init` e `apply` con state locale; poi riattivare il backend e `init -migrate-state`.
 2. `infra/scripts/inventory.sh`, poi compilare `terraform.tfvars`. Verificare in particolare nomi delle
    policy inline, permesso della Function URL (`lambda:InvokeFunctionUrl` e, se presente, `lambda:InvokeFunction`),
    policy gestite dei ruoli e versione del guard puntata dalla schedule.

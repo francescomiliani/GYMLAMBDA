@@ -3,6 +3,18 @@
 
 terraform {
   required_version = ">= 1.10"
+
+  # State nello stesso bucket che crea (migrato dallo state locale il 2026-11-19).
+  # Per ricrearlo da zero: commentare il backend, apply con state locale, poi init -migrate-state.
+  backend "s3" {
+    bucket       = "gymbooking-tfstate-163876584948"
+    key          = "gymbooking/bootstrap.tfstate"
+    region       = "eu-north-1"
+    profile      = "aws-personale"
+    encrypt      = true
+    use_lockfile = true
+  }
+
   required_providers {
     aws = {
       source  = "hashicorp/aws"
