@@ -20,14 +20,13 @@ TIME = re.compile(r'(?:[01]\d|2[0-3]):[0-5]\d\Z')
 
 
 def class_dates(scheduled):
-    """Class days for this occurrence.
+    """Class day for this occurrence: the same weekday seven days later.
 
-    Monday at 00:00 Europe/Rome books Monday, Wednesday and Friday of that week.
-    Any other fire keeps the previous rule: the same weekday seven days later.
+    The schedule fires every day at 00:00 Europe/Rome. The portal opens a class
+    exactly seven days ahead, so each day only the class that just opened is
+    tried, and only if its weekday is in the preferences (otherwise no claim).
     """
     local = scheduled.astimezone(ZoneInfo('Europe/Rome'))
-    if local.weekday() == 0 and local.hour == 0 and local.minute == 0:
-        return [local.date() + datetime.timedelta(days=offset) for offset in (0, 2, 4)]
     return [local.date() + datetime.timedelta(days=7)]
 
 

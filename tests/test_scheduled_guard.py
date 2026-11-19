@@ -246,42 +246,29 @@ class ScheduledGuardTests(unittest.TestCase):
         self.booking.assert_called_once()
         self.assertEqual(len(self.client.items), 1)
 
-    def test_monday_midnight_books_monday_wednesday_and_friday(self):
-        stamp = '2026-11-22T23:00:00Z'  # lunedì 2026-11-23 00:00 a Roma
-        self.clock.now.return_value = datetime.datetime.fromisoformat('2026-11-22T23:00:00+00:00')
+    def test_every_day_books_only_the_class_that_opens_seven_days_ahead(self):
         self.set_state('prefs', {
             'MON': [{'activity': 'gym', 'time': '07:00'}],
             'WED': [{'activity': 'gym', 'time': '07:00'}],
             'FRI': [{'activity': 'gym', 'time': '07:00'}],
         })
-        result = self.call(scheduled_time=stamp)
-        self.assertEqual(result['status'], 'completed')
-        self.assertEqual(self.booking.call_args_list, [
-            call({'date': '2026-11-23', 'time': '07:00'}, None),
-            call({'date': '2026-11-25', 'time': '07:00'}, None),
-            call({'date': '2026-11-27', 'time': '07:00'}, None),
-        ])
-        self.assertEqual(guard_store(self.client, 'table').get_state('last_run')['date'],
-                         '2026-11-23, 2026-11-25, 2026-11-27')
-
-    def test_monday_midnight_books_the_other_days_when_one_slot_is_closed(self):
-        stamp = '2026-11-22T23:00:00Z'
-        self.clock.now.return_value = datetime.datetime.fromisoformat('2026-11-22T23:00:00+00:00')
-        self.booking.side_effect = [RuntimeError('2026-11-23 non prenotabile'),
-                                    {'message': 'confirmed'}, {'message': 'confirmed'}]
-        result = self.call(scheduled_time=stamp)
-        self.assertEqual([item[0][0]['date'] for item in self.booking.call_args_list],
-                         ['2026-11-23', '2026-11-25', '2026-11-27'])
-        self.assertEqual(result['results'][0]['status'], 'rejected')
-        self.assertEqual(next(iter(self.client.items.values()))['status'], {'S': 'completed'})
-
-    def test_monday_midnight_skips_a_date_without_dropping_the_others(self):
-        stamp = '2026-11-22T23:00:00Z'
-        self.clock.now.return_value = datetime.datetime.fromisoformat('2026-11-22T23:00:00+00:00')
-        self.set_state('skip#2026-11-25', {'skipped': True})
-        self.call(scheduled_time=stamp)
-        self.assertEqual([item[0][0]['date'] for item in self.booking.call_args_list],
-                         ['2026-11-23', '2026-11-27'])
+        # (istante UTC dello scatto, lezione attesa o None se il giorno non è in preferenza)
+        week = [('2026-11-22T23:00:00Z', '2026-11-30'),  # lun 23 00:00 Roma -> lun 30
+                ('2026-11-23T23:00:00Z', None),          # mar 24 -> mar 1/12, non in preferenza
+                ('2026-11-24T23:00:00Z', '2026-12-02'),  # mer 25 -> mer 2/12
+                ('2026-11-25T23:00:00Z', None),          # gio 26 -> gio 3/12
+                ('2026-11-26T23:00:00Z', '2026-12-04'),  # ven 27 -> ven 4/12
+                ('2026-11-27T23:00:00Z', None),          # sab 28
+                ('2026-11-28T23:00:00Z', None)]          # dom 29
+        for stamp, expected in week:
+            self.booking.reset_mock()
+            self.clock.now.return_value = datetime.datetime.fromisoformat(stamp.replace('Z', '+00:00'))
+            result = self.call(scheduled_time=stamp)
+            if expected:
+                self.booking.assert_called_once_with({'date': expected, 'time': '07:00'}, None)
+            else:
+                self.booking.assert_not_called()
+                self.assertEqual(result['status'], 'skipped')
 
     def test_rome_date_and_dst(self):
         for stamp, expected in [('2026-03-28T23:30:00Z', '2026-04-05'),

@@ -28,14 +28,21 @@ else:
     from ssm_config import get_secret
 
 
-HELP = ('📖 Comandi: /bookings, /activities, /schedule ID DATA, '
-        '/book ATTIVITA DATA APPUNTAMENTO, /cancel ID, '
-        '/waitlist_join ATTIVITA DATA APPUNTAMENTO, /waitlist_leave ID, '
-        '/waitlist_confirm ID, /automation, /weekly GIORNI HH:MM, /disable, '
-        '/orari, /calendar, /prefs [GIORNO ORARI|off], /skip [off] DATA, /status. '
-        'Per le azioni servono gli ID mostrati da /bookings, /activities e /schedule. '
-        'Giorni: MON,TUE,WED,THU,FRI,SAT,SUN. L’attivazione è bloccata. '
-        'Esempio preferenze con fallback: /prefs MON 07:00,12:30 (prima le 7, poi le 12:30).')
+HELP = ('📖 Cosa posso fare\n\n'
+        '🗓️ Vedere\n'
+        '• /disponibilita: slot liberi e pieni dei prossimi giorni\n'
+        '• /orari: orari della sala attrezzi e dei corsi\n'
+        '• /bookings: le tue prenotazioni\n'
+        '• /status: stato dell’automazione\n\n'
+        '⭐ Automazione (prenota da sola ogni giorno a mezzanotte, 7 giorni prima)\n'
+        '• /prefs: giorni e orari preferiti\n'
+        '   es. /prefs lun 07:00,08:00 (prima le 7, se è pieno le 8)\n'
+        '   es. /prefs ven 7 · /prefs mer off\n'
+        '• /skip 2026-11-25: salta un giorno · /skip off 2026-11-25: riprendi\n'
+        '• /automation: quando parte e cosa fa · /disable: sospendi\n\n'
+        '🔧 Avanzati: /activities, /schedule ID DATA, /book, /cancel ID, /waitlist_join, '
+        '/waitlist_leave ID, /waitlist_confirm ID, /calendar. '
+        'Per le azioni servono gli ID mostrati da /bookings, /activities e /schedule. L’attivazione è bloccata.')
 MUTATIONS = {'book', 'cancel', 'waitlist_join', 'waitlist_leave', 'waitlist_confirm'}
 MAX_BODY_BYTES = 64 * 1024
 
@@ -173,19 +180,22 @@ def _handle_message(message, token, owner, update_id=None):
         return
     command = parts[0]
     chat_id = message['chat']['id']
-    if command in ('/weekly', '/disable', '/prefs', '/skip') or (command.startswith('/') and command[1:] in MUTATIONS):
+    if command in ('/disable', '/prefs', '/skip') or (command.startswith('/') and command[1:] in MUTATIONS):
         if type(update_id) is not int or update_id < 0:
             raise ValueError('Update ID non valido')
     if command in ('/start', '/help'):
         _send(token, chat_id, HELP, [[{'text': '📅 Impegni', 'callback_data': 'read:bookings'},
                                       {'text': '🏋️ Attività', 'callback_data': 'read:activities'}],
                                      [{'text': '🗓️ Orari', 'callback_data': 'menu:orari'},
-                                      {'text': '📆 Calendario', 'callback_data': 'menu:calendar'}],
+                                      {'text': '🟢 Disponibilità', 'callback_data': 'menu:disponibilita'}],
+                                     [{'text': '📆 Calendario', 'callback_data': 'menu:calendar'}],
                                      [{'text': '📡 Stato', 'callback_data': 'menu:status'},
                                       {'text': '⚙️ Automazione', 'callback_data': 'menu:automation'}],
                                      [{'text': '❓ Aiuto', 'callback_data': 'menu:help'}]])
     elif command == '/orari' and len(parts) == 1:
         _send(token, chat_id, timetable.format_week())
+    elif command == '/disponibilita' and len(parts) == 1:
+        _run_ui(token, chat_id, owner, {'kind': 'week', 'date': _today().isoformat()})
     elif command == '/status' and len(parts) == 1:
         _send(token, chat_id, _status_text(token))
     elif command == '/calendar' and len(parts) == 1:
@@ -205,23 +215,12 @@ def _handle_message(message, token, owner, update_id=None):
         if action == 'bookings':
             ui['sid'] = _screen_id(owner, update_id)
         _run_ui(token, chat_id, owner, ui)
-    elif command == '/automation':
-        snapshot = _scheduler().get_schedule()
-        _send(token, chat_id, '⚙️ Stato: {}\n🗓️ Programma: {}\n🌍 Fuso: {}'.format(
-            snapshot.get('State'), snapshot.get('ScheduleExpression'), snapshot.get('ScheduleExpressionTimezone')))
-    elif command in ('/weekly', '/disable'):
-        payload = {'action': command[1:]}
-        if command == '/weekly':
-            if len(parts) != 3:
-                raise ValueError('Uso: /weekly MON,WED HH:MM')
-            days = parts[1].split(',')
-            clock = parts[2].split(':')
-            if (not days or len(set(days)) != len(days) or any(d not in ('MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN') for d in days)
-                    or len(clock) != 2 or any(len(x) != 2 or not x.isascii() or not x.isdigit() for x in clock)
-                    or int(clock[0]) > 23 or int(clock[1]) > 59):
-                raise ValueError('Giorni o ora non validi')
-            payload.update(days=days, hour=int(clock[0]), minute=int(clock[1]))
-        elif len(parts) != 1:
+    elif command == '/automation' and len(parts) == 1:
+        text, keyboard = _automation_screen()
+        _send(token, chat_id, text, keyboard)
+    elif command == '/disable':
+        payload = {'action': 'disable'}
+        if len(parts) != 1:
             raise ValueError('Comando non valido')
         store = _store()
         previous = store.get_update(str(update_id))
@@ -243,11 +242,12 @@ def _handle_message(message, token, owner, update_id=None):
 def _prefs_or_skip(command, parts, token, chat_id, owner, update_id):
     if command == '/prefs':
         if len(parts) == 1:
-            _send(token, chat_id, '⭐ Preferenze (giorno della lezione, prima scelta a sinistra): '
-                  + timetable.format_prefs(_store().get_state('prefs')))
+            _send(token, chat_id, '⭐ Preferenze (giorno della lezione, prima scelta a sinistra):'
+                  + ' ' + timetable.format_prefs(_store().get_state('prefs'))
+                  + '\n\n✏️ Cambia: /prefs lun 07:00,08:00 · togli un giorno: /prefs lun off')
             return
         if len(parts) != 3:
-            raise ValueError('Uso: /prefs MON 07:00,12:30 oppure /prefs MON off. ')
+            raise ValueError('Uso: /prefs GIORNO ORARI. Esempi: /prefs lun 07:00,12:30 (prima le 7, se pieno le 12:30) · /prefs ven 8 · /prefs mer off. ')
         payload = {'action': 'prefs', 'day': timetable.parse_day(parts[1]), 'times': timetable.parse_times(parts[2])}
     else:
         skipped = not (len(parts) == 3 and parts[1] == 'off')
@@ -260,22 +260,109 @@ def _prefs_or_skip(command, parts, token, chat_id, owner, update_id):
     _confirm(token, chat_id, owner, payload, update_id)
 
 
-def _next_run(snapshot, now):
-    """Next scheduled run (Europe/Rome) from either a cron expression or the local bot's fields."""
-    if snapshot.get('State') != 'ENABLED':
-        return 'nessuna (automazione non attiva)'
+def describe_schedule(snapshot):
+    """Human sentence for a Scheduler snapshot (or the local bot's fields), e.g. 'ogni giorno alle 00:00'."""
     days, hour, minute = snapshot.get('days'), snapshot.get('hour'), snapshot.get('minute')
     if days is None:
         match = re.fullmatch(r'cron\((\d+) (\d+) \? \* ([A-Z,]+) \*\)', str(snapshot.get('ScheduleExpression')))
         if not match:
-            return 'non calcolabile'
+            return f'programma tecnica {snapshot.get("ScheduleExpression")}'
+        minute, hour, days = int(match[1]), int(match[2]), match[3].split(',')
+    if set(days) == set(timetable.DAYS):
+        when = 'ogni giorno'
+    else:
+        names = {'MON': 'lunedì', 'TUE': 'martedì', 'WED': 'mercoledì', 'THU': 'giovedì', 'FRI': 'venerdì',
+                 'SAT': 'sabato', 'SUN': 'domenica'}
+        when = 'ogni ' + ', '.join(names[d] for d in timetable.DAYS if d in days)
+    return f'{when} alle {hour:02d}:{minute:02d}'
+
+
+def _next_run_at(snapshot, now):
+    """Datetime of the next scheduled run (Europe/Rome), or None if not active or not computable."""
+    if snapshot.get('State') != 'ENABLED':
+        return None
+    days, hour, minute = snapshot.get('days'), snapshot.get('hour'), snapshot.get('minute')
+    if days is None:
+        match = re.fullmatch(r'cron\((\d+) (\d+) \? \* ([A-Z,]+) \*\)', str(snapshot.get('ScheduleExpression')))
+        if not match:
+            return None
         minute, hour, days = int(match[1]), int(match[2]), match[3].split(',')
     for offset in range(8):
         day = now + datetime.timedelta(days=offset)
         candidate = day.replace(hour=hour, minute=minute, second=0, microsecond=0)
         if timetable.DAYS[day.weekday()] in days and candidate > now:
-            return f'{WEEKDAYS[candidate.weekday()]} {candidate:%d/%m %H:%M}'
-    return 'non calcolabile'
+            return candidate
+    return None
+
+
+def _next_run(snapshot, now):
+    """Next scheduled run as text, from either a cron expression or the local bot's fields."""
+    if snapshot.get('State') != 'ENABLED':
+        return 'nessuna (automazione non attiva)'
+    candidate = _next_run_at(snapshot, now)
+    return f'{WEEKDAYS[candidate.weekday()]} {candidate:%d/%m %H:%M}' if candidate else 'non calcolabile'
+
+
+def _automation_view(snapshot, now, prefs, is_skipped, prefs_known=True):
+    """Text and buttons for /automation: state, when it runs, what it will book next, one-tap actions."""
+    active = snapshot.get('State') == 'ENABLED'
+    lines = [f'⚙️ Automazione: {"🟢 attiva" if active else "⏸️ sospesa"}',
+             f'⏰ Parte {describe_schedule(snapshot)} (ora di Roma)']
+    buttons = []
+    run = _next_run_at(snapshot, now)
+    if run:
+        target = run.date() + datetime.timedelta(days=7)
+        label = f'{WEEKDAYS[target.weekday()]} {target:%d/%m}'
+        lines.append(f'➡️ Prossima: {WEEKDAYS[run.weekday()]} {run:%d/%m} alle {run:%H:%M}')
+        times = timetable.resolve_times(prefs, target.isoformat())
+        if not prefs_known:
+            lines.append('❔ Preferenze non leggibili in questo momento.')
+        elif prefs is None:
+            lines.append('📌 Nessuna preferenza salvata: userò l’orario predefinito. Impostale con /prefs.')
+        elif is_skipped(target):
+            lines.append(f'⏭️ {label} è saltato: non prenoto.')
+            buttons.append(_button(f'▶️ Riprendi {label}', f'auto:resume:{target:%Y%m%d}'))
+        elif not times:
+            lines.append(f'💤 {label} non è nelle preferenze: non prenoto.')
+        else:
+            lines.append(f'🏋️ Prenoterò {label}: ' + ' → '.join(f'{timetable.period_of(t)[0]} {t}' for t in times))
+            buttons.append(_button(f'⏭️ Salta {label}', f'auto:skip:{target:%Y%m%d}'))
+    elif active:
+        lines.append('➡️ Prossima esecuzione non calcolabile.')
+    else:
+        lines.append('➡️ Nessuna esecuzione finché è sospesa. La riattivazione non si fa dal bot.')
+    if active:
+        buttons.append(_button('⏸️ Sospendi', 'auto:disable'))
+    buttons.append(_button('⭐ Preferenze', 'auto:prefs'))
+    lines.append(f'🧾 Tecnico: {snapshot.get("State")} · {snapshot.get("ScheduleExpression")}')
+    return '\n'.join(lines), _rows(buttons, 2)
+
+
+def _automation_screen():
+    now = datetime.datetime.now(ZoneInfo(TIMEZONE))
+    snapshot = _scheduler().get_schedule()
+    try:
+        store = _store()
+        prefs = store.get_state('prefs')
+        return _automation_view(snapshot, now, prefs,
+                                lambda day: (store.get_state('skip#' + day.isoformat()) or {}).get('skipped'))
+    except Exception:
+        return _automation_view(snapshot, now, None, lambda day: False, prefs_known=False)
+
+
+def _automation_callback(data, update, callback, token, owner):
+    """auto:skip|resume:YYYYMMDD, auto:disable, auto:prefs reuse the typed commands (and their confirmations)."""
+    parts = data.split(':')
+    if parts[1] in ('skip', 'resume') and len(parts) == 3:
+        day = datetime.datetime.strptime(parts[2], '%Y%m%d').date()
+        if not _today() <= day <= _today() + datetime.timedelta(days=9):
+            raise ValueError('Data fuori intervallo')
+        text = f'/skip {day.isoformat()}' if parts[1] == 'skip' else f'/skip off {day.isoformat()}'
+    elif data in ('auto:disable', 'auto:prefs'):
+        text = '/' + parts[1]
+    else:
+        raise ValueError('Callback non valida')
+    _handle_message({'chat': callback['message']['chat'], 'text': text}, token, owner, update.get('update_id'))
 
 
 def _status_text(token):
@@ -291,7 +378,8 @@ def _status_text(token):
 
     def schedule():
         snapshot = _scheduler().get_schedule()
-        return f'{snapshot.get("State")}, prossima esecuzione {_next_run(snapshot, now)}'
+        return (f'{snapshot.get("State")}, {describe_schedule(snapshot)}, '
+                f'prossima esecuzione {_next_run(snapshot, now)}')
 
     def webhook():
         info = _telegram(token, 'getWebhookInfo', {})
@@ -331,7 +419,7 @@ def _confirmation_message(owner, payload, update_id, store=None, summary=None, e
         owner, payload, expires_at or int(time.time()) + 300, str(update_id))
     names = {'book': 'Prenotazione', 'cancel': 'Cancellazione', 'waitlist_join': 'Ingresso in lista d’attesa',
              'waitlist_leave': 'Uscita dalla lista d’attesa', 'waitlist_confirm': 'Conferma dalla lista d’attesa',
-             'weekly': 'Modifica programmazione settimanale', 'disable': 'Disabilitazione automazione',
+             'disable': 'Disabilitazione automazione',
              'prefs': 'Preferenze di prenotazione', 'skip': 'Occorrenza dell’automazione'}
     labels = {'activity_id': 'ID attività', 'date': 'Data', 'appointment_id': 'ID appuntamento',
               'booking_id': 'ID impegno', 'days': 'Giorni', 'hour': 'Ora', 'minute': 'Minuti',
@@ -533,6 +621,8 @@ def _read_request(ui):
         return {'action': 'bookings' if kind != 'activities' else 'activities'}
     if kind == 'booking':
         return {'action': 'bookings'}
+    if kind == 'week':
+        return {'action': 'week', 'date': require_date(ui['date'])}
     return {'action': 'schedule', 'activity_id': ui['activity_id'], 'date': ui['date']}
 
 
@@ -589,6 +679,51 @@ def _day_view(ui, slots):
     return text, _rows(buttons[:BUTTON_LIMIT]) + [[{'text': '⬅️ Indietro', 'callback_data': 'fa:' + activity_id}]]
 
 
+SLOT_ICONS = {'free': '✅', 'full': '🔴', 'booked': '🎟️', 'waitlist': '⏳', 'closed': '⚪'}
+
+
+def _week_view(week):
+    """Availability grid: one block per day, slots grouped by part of the day, one emoji per slot."""
+    if not isinstance(week, dict) or not isinstance(week.get('days'), list):
+        raise ValueError('Risultato non valido')
+    booked, waiting = set(), set()
+    for item in week.get('bookings') or []:
+        if isinstance(item, dict) and item.get('isService') is not True:
+            try:
+                date = datetime.datetime.strptime(item['DateStart'], '%d/%m/%Y').date().isoformat()
+            except (KeyError, TypeError, ValueError):
+                continue
+            (waiting if item.get('isOnWaitlist') is True else booked).add((date, item.get('TimeStart')))
+    times = timetable.gym_times()
+    lines, buttons = ['🏋️ Disponibilità sala attrezzi', ''], []
+    for entry in week['days']:
+        if not isinstance(entry, dict) or not isinstance(entry.get('slots'), list):
+            raise ValueError('Risultato non valido')
+        day = datetime.date.fromisoformat(require_date(entry['date']))
+        by_time = {s.get('TimeStart'): s for s in entry['slots'] if isinstance(s, dict) and s.get('Type') == 'class'}
+        lines.append(f'📆 {WEEKDAYS[day.weekday()]} {day:%d/%m}')
+        for emoji, _, start, end in timetable.PERIODS:
+            cells = []
+            for time_ in (t for t in times if start <= t < end):
+                if (entry['date'], time_) in booked:
+                    state = 'booked'
+                elif (entry['date'], time_) in waiting:
+                    state = 'waitlist'
+                else:
+                    state = {'book': 'free', 'waitlist_join': 'full'}.get(_slot_action(by_time.get(time_)), 'closed')
+                cells.append(f'{SLOT_ICONS[state]} {time_}')
+            if cells:
+                lines.append(f'{emoji} ' + '   '.join(cells))
+        lines.append('')
+        buttons.append(_button(f'📆 {WEEKDAYS[day.weekday()]} {day:%d/%m}',
+                               f'fd:{timetable.GYM_ACTIVITY_ID}:{day:%Y%m%d}'))
+    if not week['days']:
+        lines.append('Nessuno slot nei prossimi giorni.')
+    lines.append('✅ libero · 🔴 pieno · 🎟️ prenotato · ⏳ in lista · ⚪ non prenotabile')
+    lines.append('👇 Tocca un giorno per prenotare o metterti in lista d’attesa.')
+    return '\n'.join(lines), _rows(buttons, 3) or None
+
+
 def render_ui(ui, result, owner, store=None):
     """Pure renderer shared by webhook and worker: return (text, keyboard or None).
 
@@ -606,6 +741,8 @@ def render_ui(ui, result, owner, store=None):
     if kind == 'day':
         require_id(ui.get('activity_id'))
         return _day_view(ui, result['schedule'])
+    if kind == 'week':
+        return _week_view(result['week'])
     sel = ui.get('sel')
     if not isinstance(sel, str) or not SELECTION_ID_PATTERN.fullmatch(sel):
         raise ValueError('Identità selezione non valida')
@@ -708,11 +845,14 @@ def _handle_callback(update, callback, token, owner):
     except TelegramError:
         pass
     data = callback.get('data')
+    if isinstance(data, str) and data.startswith('auto:'):
+        _automation_callback(data, update, callback, token, owner)
+        return
     if data in ('read:bookings', 'read:activities'):
         action = data.split(':')[1]
         _run_ui(token, chat_id, owner, _parse_ui(data, owner, update.get('update_id')))
         return
-    if data in ('menu:automation', 'menu:help', 'menu:orari', 'menu:status', 'menu:calendar'):
+    if data in ('menu:automation', 'menu:help', 'menu:orari', 'menu:status', 'menu:calendar', 'menu:disponibilita'):
         _handle_message({'chat': callback['message']['chat'], 'text': '/' + data.split(':')[1]}, token, owner)
         return
     if isinstance(data, str) and data.startswith('cancel:'):
@@ -765,7 +905,7 @@ def _handle_callback(update, callback, token, owner):
             _send(token, chat_id, '⚠️ Esito incerto: verifica con /prefs o /status prima di riprovare.')
         else:
             _send(token, chat_id, '✅ Preferenze aggiornate.' if action == 'prefs' else '✅ Occorrenza aggiornata.')
-    elif action in ('weekly', 'disable'):
+    elif action == 'disable':
         try:
             job = store.claim_job(data)
         except StoreConflict:
@@ -777,10 +917,7 @@ def _handle_callback(update, callback, token, owner):
             snapshot = scheduler.get_schedule()
             if fingerprint(snapshot) != payload['fingerprint']:
                 raise ValueError('Schedule cambiata')
-            if action == 'weekly':
-                scheduler.set_weekly_time(snapshot, payload['days'], payload['hour'], payload['minute'])
-            else:
-                scheduler.disable(snapshot, confirmed=True)
+            scheduler.disable(snapshot, confirmed=True)
             store.finish_job(data, 'completed', {'status': 'confirmed'})
         except Exception:
             try:

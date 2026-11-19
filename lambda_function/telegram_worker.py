@@ -1,12 +1,15 @@
+import datetime
 import json
 import os
 
 import requests
 
 if __package__:
+    from . import timetable
     from .sportrick import SportrickClient, require_date, require_id
     from .ssm_config import get_secret
 else:
+    import timetable
     from sportrick import SportrickClient, require_date, require_id
     from ssm_config import get_secret
 
@@ -17,15 +20,27 @@ def outcome_text(result):
     return f'{emoji} Esito operazione: {label}'
 
 
+def week_availability(client, start, days=7):
+    """Gym slots for the next days (Mon-Fri only) plus the user's bookings, in one portal session."""
+    result = []
+    for offset in range(days):
+        day = start + datetime.timedelta(days=offset)
+        if day.weekday() < 5:
+            result.append({'date': day.isoformat(), 'slots': client.schedule(timetable.GYM_ACTIVITY_ID, day.isoformat())})
+    return {'days': result, 'bookings': client.bookings()}
+
+
 def read_action(event):
     if not isinstance(event, dict):
         raise ValueError('Evento non valido')
     action = event.get('action')
-    if not isinstance(action, str) or action not in ('activities', 'bookings', 'schedule'):
+    if not isinstance(action, str) or action not in ('activities', 'bookings', 'schedule', 'week'):
         raise ValueError('Azione non riconosciuta')
     args = ()
     if action == 'schedule':
         args = (require_id(event.get('activity_id')), require_date(event.get('date')))
+    if action == 'week':
+        start = datetime.date.fromisoformat(require_date(event.get('date')))
 
     username = get_secret('SPORTRICK_USERNAME')
     password = get_secret('SPORTRICK_PASSWORD')
@@ -35,6 +50,8 @@ def read_action(event):
         with requests.Session() as session:
             client = SportrickClient(session)
             client.login(username, password)
+            if action == 'week':
+                return {'week': week_availability(client, start)}
             return {action: getattr(client, action)(*args)}
     except Exception:
         raise RuntimeError('Sportrick request or response failed') from None
@@ -106,7 +123,7 @@ def lambda_handler(event, context):
             keyboard = None
             if 'ui' in event:
                 ui = event['ui']
-                if not isinstance(ui, dict) or ui.get('kind') not in ('activities', 'bookings', 'schedule', 'day', 'slot', 'booking', 'calendar'):
+                if not isinstance(ui, dict) or ui.get('kind') not in ('activities', 'bookings', 'schedule', 'day', 'slot', 'booking', 'calendar', 'week'):
                     raise ValueError('Descrittore non valido')
                 if __package__:
                     from . import telegram_bot

@@ -175,6 +175,19 @@ class TelegramBotTests(unittest.TestCase):
             self.assertEqual(self.callback(), 200)
             self.assertIn('scaduta', self.post.call_args.kwargs['json']['text'])
 
+    def test_automation_buttons_open_the_usual_confirmations(self):
+        with patch.object(telegram_bot, '_store') as factory:
+            create = factory.return_value.create_confirmation_once
+            create.return_value = 'opaque'
+            self.assertEqual(self.callback('auto:skip:20261118', update_id=7), 200)
+            self.assertEqual(create.call_args.args[1], {'action': 'skip', 'date': '2026-11-18', 'skipped': True})
+            self.assertEqual(self.callback('auto:resume:20261118', update_id=8), 200)
+            self.assertEqual(create.call_args.args[1], {'action': 'skip', 'date': '2026-11-18', 'skipped': False})
+            calls = create.call_count
+            self.assertEqual(self.callback('auto:skip:20300101', update_id=9), 200)  # fuori intervallo
+            self.assertEqual(self.callback('auto:boh', update_id=10), 200)
+            self.assertEqual(create.call_count, calls)
+
     def test_schedule_confirmation_and_disable(self):
         snapshot = {'State': 'ENABLED', 'ScheduleExpression': 'old'}
         with patch.object(telegram_bot, '_scheduler') as scheduler, patch.object(telegram_bot, '_store') as factory:
@@ -182,14 +195,7 @@ class TelegramBotTests(unittest.TestCase):
             store = factory.return_value
             store.get_update.return_value = None
             store.create_confirmation_once.return_value = 'opaque'
-            self.message['text'] = '/weekly MON,WED 08:30'
-            self.assertEqual(self.invoke(), 200)
-            payload = store.create_confirmation_once.call_args.args[1]
-            store.consume_confirmation.return_value = {'status': 'pending', 'payload': payload}
             store.should_dispatch.return_value = True
-            store.claim_job.return_value = {'payload': payload}
-            self.assertEqual(self.callback(), 200)
-            scheduler.return_value.set_weekly_time.assert_called_once_with(snapshot, ['MON', 'WED'], 8, 30)
             self.message['text'] = '/disable'
             self.assertEqual(self.invoke(), 200)
             payload = store.create_confirmation_once.call_args.args[1]
@@ -235,7 +241,7 @@ class TelegramBotTests(unittest.TestCase):
         self.assertEqual(self.invoke(), 200)
         keyboard = self.post.call_args.kwargs['json']['reply_markup']['inline_keyboard']
         self.assertEqual([b['callback_data'] for row in keyboard for b in row],
-                         ['read:bookings', 'read:activities', 'menu:orari', 'menu:calendar', 'menu:status', 'menu:automation', 'menu:help'])
+                         ['read:bookings', 'read:activities', 'menu:orari', 'menu:disponibilita', 'menu:calendar', 'menu:status', 'menu:automation', 'menu:help'])
         with patch.object(telegram_bot, '_scheduler') as scheduler:
             scheduler.return_value.get_schedule.return_value = {'State': 'DISABLED'}
             self.assertEqual(self.callback('menu:automation'), 200)
@@ -287,7 +293,7 @@ class TelegramBotTests(unittest.TestCase):
 
     def test_missing_or_invalid_command_update_id_has_no_effect(self):
         with patch.object(telegram_bot, '_store') as store, patch.object(telegram_bot, '_scheduler') as scheduler:
-            for command in ('/cancel 123', '/weekly MON 08:30', '/disable'):
+            for command in ('/cancel 123', '/disable'):
                 self.message['text'] = command
                 for update in ({}, {'update_id': None}, {'update_id': True}, {'update_id': -1}, {'update_id': '42'}):
                     body = json.dumps({**update, 'message': self.message})
@@ -303,7 +309,7 @@ class TelegramBotTests(unittest.TestCase):
             scheduler.return_value.get_schedule.return_value = {'State': 'ENABLED'}
             store.get_update.return_value = None
             store.create_confirmation_once.return_value = 'opaque'
-            self.message['text'] = '/weekly MON 08:30'
+            self.message['text'] = '/disable'
             self.assertEqual(self.invoke(), 200)
             payload = store.create_confirmation_once.call_args.args[1].copy()
             store.get_update.return_value = {'kind': 'confirmation', 'owner': '123', 'payload': payload, 'token': 'opaque'}
@@ -311,7 +317,7 @@ class TelegramBotTests(unittest.TestCase):
             self.assertEqual(self.invoke(), 200)
             self.assertEqual(store.create_confirmation_once.call_args.args[1], payload)
             self.assertEqual(scheduler.return_value.get_schedule.call_count, 1)
-            self.message['text'] = '/weekly TUE 08:30'
+            self.message['text'] = '/disable x'
             self.assertEqual(self.invoke(), 200)
             self.assertEqual(store.create_confirmation_once.call_count, 2)
 
@@ -331,7 +337,7 @@ class TelegramBotTests(unittest.TestCase):
             store.get_state.return_value = prefs
             self.message['text'] = '/prefs'
             self.assertEqual(self.invoke(), 200)
-            self.assertIn('Lunedì 07:00', self.last()['text'])
+            self.assertIn('Lunedì: 🌅 07:00', self.last()['text'])
             store.create_confirmation_once.return_value = 'opaque'
             self.message['text'] = '/prefs mon 12:30,07:00'
             self.assertEqual(self.invoke(), 200)
@@ -390,7 +396,7 @@ class TelegramBotTests(unittest.TestCase):
             self.assertIn('purge_at', store.put_state.call_args.kwargs)
             calls = store.create_confirmation_once.call_count
             for bad in ('/skip 2026-11-11', '/skip', '/skip off', '/skip 2026-13-01', '/prefs MON', '/prefs SAT 07:00',
-                        '/prefs MON 08:00', '/prefs MON 07:00 x'):
+                        '/prefs MON 09:00', '/prefs MON 07:00 x'):
                 self.message['text'] = bad
                 with self.subTest(bad=bad):
                     self.assertEqual(self.invoke(), 200)
@@ -410,7 +416,7 @@ class TelegramBotTests(unittest.TestCase):
             self.message['text'] = '/status'
             self.assertEqual(self.invoke(), 200)
         text = self.post.call_args_list[-1].kwargs['json']['text']
-        for expected in ('ENABLED, prossima esecuzione', 'Lunedì 07:00 > 12:30', '16/11 07:00 completed',
+        for expected in ('ENABLED, ogni lunedì, mercoledì, venerdì alle 07:00, prossima esecuzione', 'Lunedì: 🌅 07:00 → 🍽️ 12:30', '16/11 07:00 completed',
                          '4 update in coda', '400 Bad Request'):
             self.assertIn(expected, text)
 
@@ -485,7 +491,7 @@ class TelegramBotTests(unittest.TestCase):
             self.assertIn('nessuna prenotazione', self.last()['text'])
             calls = create.call_count
             for bad, reason in (('/prefs MON 07:00,07:00', 'Orari ammessi'),
-                                 ('/prefs MON 08:00,07:00', 'Orari ammessi'),
+                                 ('/prefs MON 09:00,07:00', 'Orari ammessi'),
                                  ('/prefs SAT 07:00', 'Giorno non valido'),
                                  ('/prefs SUN off', 'Giorno non valido'),
                                  ('/prefs MON 07:00, 12:30', 'Uso: /prefs')):
@@ -518,7 +524,7 @@ class TelegramBotTests(unittest.TestCase):
         self.assertEqual(self.last()['text'], '⚠️ Richiesta non valida o scaduta. Uso: /schedule ID DATA. Riprova da /start.')
         self.message['text'] = '/prefs MON'
         self.assertEqual(self.invoke(), 200)
-        self.assertIn('/prefs MON off. Riprova', self.last()['text'])
+        self.assertIn('/prefs mer off. Riprova', self.last()['text'])
 
     def test_malformed_authenticated_update_never_blocks_telegram_queue(self):
         self.message['text'] = '/schedule 12'
@@ -984,6 +990,78 @@ class DuplicateScreenIntegrationTests(unittest.TestCase):
         tokens = {self.worker_render(e)[1][0][0]['callback_data'] for e in self.events[1:]}
         self.assertEqual(len(tokens), 1)
         self.assertEqual(self.dispatched, [])
+
+class WeekViewTests(unittest.TestCase):
+    def slot(self, time, notes='Prenota'):
+        return {'TimeStart': time, 'Type': 'class', 'Status': 'Available', 'Notes': notes, 'EventName': 'SALA ATTREZZI',
+                'AppointmentId': '1' + time.replace(':', '')}
+
+    def test_grid_marks_free_full_booked_and_closed_slots(self):
+        full = telegram_bot.WAITLIST_NOTE
+        week = {'days': [{'date': '2026-11-23', 'slots': [self.slot('07:00'), self.slot('08:00'),
+                                                        self.slot('12:30', full), self.slot('13:30')]},
+                         {'date': '2026-11-25', 'slots': []}],
+                'bookings': [{'DateStart': '23/11/2026', 'TimeStart': '08:00', 'isOnWaitlist': False}]}
+        text, keyboard = telegram_bot._week_view(week)
+        self.assertIn('📆 Lun 23/11\n🌅 ✅ 07:00   🎟️ 08:00\n🍽️ 🔴 12:30   ✅ 13:30\n🌙 ⚪ 18:15   ⚪ 19:15', text)
+        self.assertIn('📆 Mer 25/11\n🌅 ⚪ 07:00', text)
+        self.assertIn('✅ libero · 🔴 pieno', text)
+        self.assertEqual([b['callback_data'] for row in keyboard for b in row],
+                         ['fd:224715757956816031:20261123', 'fd:224715757956816031:20261125'])
+
+    def test_grid_rejects_malformed_results(self):
+        for bad in (None, {}, {'days': [{'date': '2026-11-23'}]}):
+            with self.subTest(bad=bad), self.assertRaises(ValueError):
+                telegram_bot._week_view(bad)
+
+    def test_week_read_request_and_render_ui(self):
+        ui = {'kind': 'week', 'date': '2026-11-19'}
+        self.assertEqual(telegram_bot._read_request(ui), {'action': 'week', 'date': '2026-11-19'})
+        text, _ = telegram_bot.render_ui(ui, {'week': {'days': [], 'bookings': []}}, '1')
+        self.assertIn('Nessuno slot', text)
+
+    def test_describe_schedule_is_human(self):
+        daily = {'ScheduleExpression': 'cron(0 0 ? * MON,TUE,WED,THU,FRI,SAT,SUN *)'}
+        self.assertEqual(telegram_bot.describe_schedule(daily), 'ogni giorno alle 00:00')
+        weekly = {'ScheduleExpression': 'cron(30 7 ? * MON,FRI *)'}
+        self.assertEqual(telegram_bot.describe_schedule(weekly), 'ogni lunedì, venerdì alle 07:30')
+        self.assertIn('rate(1 day)', telegram_bot.describe_schedule({'ScheduleExpression': 'rate(1 day)'}))
+
+
+class AutomationViewTests(unittest.TestCase):
+    NOW = datetime.datetime(2026, 11, 19, 10, 0, tzinfo=telegram_bot.ZoneInfo('Europe/Rome'))  # giovedì
+    DAILY = {'State': 'ENABLED', 'ScheduleExpression': 'cron(0 0 ? * MON,TUE,WED,THU,FRI,SAT,SUN *)'}
+
+    def prefs(self, *days):
+        return {d: [{'activity': 'gym', 'time': '07:00'}, {'activity': 'gym', 'time': '08:00'}] for d in days}
+
+    def callbacks(self, keyboard):
+        return [b['callback_data'] for row in keyboard for b in row]
+
+    def test_says_what_it_will_book_and_offers_skip_and_pause(self):
+        text, keyboard = telegram_bot._automation_view(self.DAILY, self.NOW, self.prefs('FRI'), lambda day: False)
+        self.assertIn('ogni giorno alle 00:00', text)
+        self.assertIn('Prossima: Ven 20/11 alle 00:00', text)
+        self.assertIn('Prenoterò Ven 27/11: 🌅 07:00 → 🌅 08:00', text)
+        self.assertEqual(self.callbacks(keyboard), ['auto:skip:20261127', 'auto:disable', 'auto:prefs'])
+
+    def test_skipped_day_offers_resume_and_unlisted_day_does_not_book(self):
+        text, keyboard = telegram_bot._automation_view(self.DAILY, self.NOW, self.prefs('FRI'), lambda day: True)
+        self.assertIn('è saltato', text)
+        self.assertIn('auto:resume:20261127', self.callbacks(keyboard))
+        text, keyboard = telegram_bot._automation_view(self.DAILY, self.NOW, self.prefs('MON'), lambda day: False)
+        self.assertIn('non è nelle preferenze', text)
+        self.assertNotIn('auto:skip:20261127', self.callbacks(keyboard))
+
+    def test_paused_and_unknown_preferences(self):
+        text, keyboard = telegram_bot._automation_view({**self.DAILY, 'State': 'DISABLED'}, self.NOW, None, lambda d: False)
+        self.assertIn('sospesa', text)
+        self.assertEqual(self.callbacks(keyboard), ['auto:prefs'])
+        text, _ = telegram_bot._automation_view(self.DAILY, self.NOW, None, lambda d: False, prefs_known=False)
+        self.assertIn('non leggibili', text)
+        text, _ = telegram_bot._automation_view(self.DAILY, self.NOW, None, lambda d: False)
+        self.assertIn('Nessuna preferenza salvata', text)
+
 
 if __name__ == '__main__':
     unittest.main()

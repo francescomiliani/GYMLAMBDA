@@ -9,15 +9,18 @@ import timetable
 class TimetableTests(unittest.TestCase):
     def test_week_lists_gym_and_courses_from_the_photo(self):
         text = timetable.format_week()
-        self.assertIn('07:00-09:00, 12:30-14:30, 18:15-20:15', text)
-        self.assertIn('Lunedì: 13:00 GAG, 18:30 Functional Training', text)
-        self.assertIn('Venerdì: 12:30 Cross Training, 13:30 Functional Training, 18:30 Functional Training', text)
-        self.assertNotIn('Sabato', text)
+        self.assertIn('Mattina: 07:00  ·  08:00', text)
+        self.assertIn('Pranzo: 12:30  ·  13:30', text)
+        self.assertIn('Sera: 18:15  ·  19:15', text)
+        self.assertIn('Lun: 13:00 GAG  ·  18:30 Functional Training', text)
+        self.assertIn('Ven: 12:30 Cross Training  ·  13:30 Functional Training  ·  18:30 Functional Training', text)
+        self.assertNotIn('Sab', text)
 
     def test_parse_times_keeps_priority_order_and_rejects_unknown_slots(self):
         self.assertEqual(timetable.parse_times('12:30,07:00'), ['12:30', '07:00'])
+        self.assertEqual(timetable.parse_times('08:00,13:30,19:15'), ['08:00', '13:30', '19:15'])
         self.assertEqual(timetable.parse_times('off'), [])
-        for bad in ('', '08:00', '07:00,07:00', '07:00;12:30', None):
+        for bad in ('', '09:00', '07:00,07:00', '07:00;12:30', None):
             with self.subTest(bad=bad), self.assertRaises(ValueError):
                 timetable.parse_times(bad)
 
@@ -52,12 +55,15 @@ class TimetableTests(unittest.TestCase):
             for start, end, title in items:
                 self.assertLess(start, end)
                 self.assertTrue(title)
-        self.assertLess(len(timetable.format_week()), 1000)  # un solo messaggio Telegram
+        self.assertLess(len(timetable.format_week()), 1500)  # un solo messaggio Telegram
 
     def test_input_variants(self):
         self.assertEqual(timetable.parse_times('OFF'), [])
         self.assertEqual(timetable.parse_day('Fri'), 'FRI')
-        for bad in ('07:00,', ',07:00', '07:00, 12:30', '7:00', '07:00-09:00'):
+        self.assertEqual(timetable.parse_times('7,12.30,1815'), ['07:00', '12:30', '18:15'])
+        self.assertEqual(timetable.parse_day('Lunedì'), 'MON')
+        self.assertEqual(timetable.parse_day('ven'), 'FRI')
+        for bad in ('07:00,', ',07:00', '07:00, 12:30', '07:00-09:00', '9'):
             with self.subTest(bad=bad), self.assertRaises(ValueError):
                 timetable.parse_times(bad)
 
@@ -69,7 +75,8 @@ class TimetableTests(unittest.TestCase):
         self.assertIn('orario predefinito', timetable.format_prefs(None))
         self.assertIn('non prenota', timetable.format_prefs({}))
         prefs = timetable.set_day(timetable.set_day(None, 'WED', ['18:15']), 'MON', ['07:00', '12:30'])
-        self.assertEqual(timetable.format_prefs(prefs), 'Lunedì 07:00 > 12:30; Mercoledì 18:15')
+        self.assertEqual(timetable.format_prefs(prefs),
+                         '\n• Lunedì: 🌅 07:00 → 🍽️ 12:30 (se pieno, passa al successivo)\n• Mercoledì: 🌙 18:15')
 
 
 if __name__ == '__main__':
