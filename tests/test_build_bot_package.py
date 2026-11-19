@@ -77,6 +77,33 @@ class BuildBotPackageTests(unittest.TestCase):
         with self.assertRaisesRegex(builder.PackageError, 'app.py'):
             builder.build(self.source, self.target)
 
+    def test_legacy_package_is_a_subset(self):
+        copied = builder.build(self.source, self.target, builder.LEGACY_ALLOWLIST)
+        self.assertEqual(copied, sorted(builder.LEGACY_ALLOWLIST))
+        self.assertEqual(sorted(p.name for p in self.target.iterdir()), sorted(builder.LEGACY_ALLOWLIST))
+        self.assertLessEqual(set(builder.LEGACY_ALLOWLIST), set(builder.ALLOWLIST))
+
+    def test_install_dependencies_targets_lambda_runtime(self):
+        calls = []
+        original = builder.subprocess.run
+        def fake(cmd, **kwargs):
+            calls.append(cmd)
+            return builder.subprocess.CompletedProcess(cmd, 0, '', '')
+        builder.subprocess.run = fake
+        self.addCleanup(setattr, builder.subprocess, 'run', original)
+        builder.install_dependencies(self.target, self.source / 'requirements.txt')
+        cmd = calls[0]
+        self.assertIn('manylinux2014_x86_64', cmd)
+        self.assertIn('cp312', cmd)
+        self.assertEqual(cmd[cmd.index('--target') + 1], str(self.target))
+
+    def test_install_dependencies_failure_raises(self):
+        original = builder.subprocess.run
+        builder.subprocess.run = lambda cmd, **kw: builder.subprocess.CompletedProcess(cmd, 1, '', 'boom')
+        self.addCleanup(setattr, builder.subprocess, 'run', original)
+        with self.assertRaisesRegex(builder.PackageError, 'boom'):
+            builder.install_dependencies(self.target, self.source / 'requirements.txt')
+
     def test_rebuild_removes_stale_files(self):
         builder.build(self.source, self.target)
         (self.target / 'stale.json').write_text('x')

@@ -14,3 +14,4 @@ ADR delle decisioni durature.
 |---|---|
 | `docs/decisions/0001-ssm-securestring-secrets.md` | Segreti in SSM Parameter Store SecureString letti a runtime, incluso il JSON di Google Calendar. |
 | `docs/decisions/0002-schedule-enable-blocked.md` | `/enable` bloccato anche con la schedule sul guard. |
+| `docs/decisions/0003-terraform-iac.md` | Terraform come unico strumento IaC, con import e dismissione di SAM (draft). |

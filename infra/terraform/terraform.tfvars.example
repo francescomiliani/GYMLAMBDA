@@ -1,0 +1,22 @@
+# Copia in terraform.tfvars (gitignorato) e compila con infra/scripts/inventory.sh.
+telegram_allowed_user_id = "<id Telegram>"
+notification_email       = "<email della subscription SNS>"
+
+existing = {
+  table_name                = "gymbot-telegram-BotTable-XXXX"
+  webhook_function_name     = "gymbot-telegram-WebhookFunction-XXXX"
+  worker_function_name      = "gymbot-telegram-WorkerFunction-XXXX"
+  guard_function_name       = "gymbot-telegram-ScheduledGuardFunction-XXXX"
+  webhook_role_name         = "gymbot-telegram-WebhookFunctionRole-XXXX"
+  worker_role_name          = "gymbot-telegram-WorkerFunctionRole-XXXX"
+  guard_role_name           = "gymbot-telegram-ScheduledGuardFunctionRole-XXXX"
+  webhook_policy_name       = "WebhookFunctionRolePolicy0"
+  worker_policy_name        = "WorkerFunctionRolePolicy0"
+  guard_policy_name         = "ScheduledGuardFunctionRolePolicy0"
+  legacy_role_name          = "GymBooking-personale-lambda-role"
+  legacy_policy_name        = "PublishBookingNotifications"
+  scheduler_policy_name     = "InvokeGymBookingGuard"
+  webhook_url_permission_id = "gymbot-telegram-WebhookFunctionUrlPublicPermissions-XXXX"
+  webhook_invoke_permission_id = "gymbot-telegram-WebhookFunctionURLInvokeAllowPublicAccess-XXXX"
+  subscription_arn          = "arn:aws:sns:eu-north-1:<account>:GymBooking-notifiche:<uuid>"
+}
