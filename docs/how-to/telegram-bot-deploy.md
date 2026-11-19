@@ -63,7 +63,7 @@ a parte: vedi la sezione sotto. Non la spegne un aggiornamento dello stack.
 
 - `setWebhook` verso la Function URL (output `WebhookUrl`) con `secret_token` uguale
   al parametro SSM e `allowed_updates=["message","callback_query"]`.
-- `setMyCommands`: `start`, `bookings`, `activities`, `automation`, `weekly`,
+- `setMyCommands`: `start`, `bookings`, `activities`, `automation`, `disponibilita`,
   `disable`, `orari`, `calendar`, `prefs`, `skip`, `status`, `help`. Il menu non si aggiorna da solo.
   Telegram usa lo scope piu' specifico: un elenco su `all_private_chats` o
   `all_group_chats` nasconde quello `default`. Imposta tutti e tre gli scope e
@@ -98,7 +98,7 @@ invece della Lambda legacy `GymBooking-personale`. Dal 2026-11-18 è `ENABLED`,
 - Ruolo scheduler: aggiunta la policy inline `InvokeGymBookingGuard`; la vecchia
   `InvokeGymBooking` e' stata lasciata come backup per il rollback.
 - La Lambda legacy resta deployata e invocabile direttamente.
-- Il lunedì a mezzanotte prenota lunedì, mercoledì e venerdì di quella settimana all'orario in `/prefs` (dal 2026-11-18: 07:00). Senza preferenze salvate usa `BookingTime`. Una data in `/skip`, o un giorno tolto dalle preferenze, non si prenota.
+- Dal 2026-11-19 il codice prenota ogni giorno la lezione a sette giorni (solo se il giorno è in `/prefs`); la schedule su AWS va aggiornata a `cron(0 0 ? * MON,TUE,WED,THU,FRI,SAT,SUN *)` con una nuova versione del guard. Prenota all'orario in `/prefs` (dal 2026-11-18: 07:00). Senza preferenze salvate usa `BookingTime`. Una data in `/skip`, o un giorno tolto dalle preferenze, non si prenota.
 
 Rollback della sola schedule (lasciarla `DISABLED`): `update-schedule` con target
 `arn:aws:lambda:eu-north-1:163876584948:function:GymBooking-personale`, `Input`

@@ -3,9 +3,10 @@
 Client Python e Lambda per consultare corsi e impegni sul portale Sportrick
 (`replywellnessTO`), prenotare e cancellare lezioni e inviare notifiche email e Telegram.
 
-**Stato:** la schedule `gym-booking-mwf-0700` è accesa dal 18/11/2026. Il lunedì a
-mezzanotte (ora di Roma) prenota la sala attrezzi delle 07:00 di lunedì, mercoledì e
-venerdì di quella settimana. Il target è la versione 1 del guard del bot, non la Lambda
+**Stato:** la schedule `gym-booking-mwf-0700` è accesa dal 18/11/2026. Nel codice (dal
+19/11/2026) il guard prenota ogni giorno, a mezzanotte di Roma, la lezione a sette giorni
+se il suo giorno è in `/prefs`; su AWS la schedule resta `cron(0 0 ? * MON *)` finché non
+si distribuisce la nuova versione e si cambia l'espressione. Il target è la versione 1 del guard del bot, non la Lambda
 legacy. **Ogni invocazione con payload di prenotazione prenota davvero.**
 
 ## Risorse in esercizio
@@ -34,7 +35,7 @@ SSM Parameter Store (`/gymbot/*`, SecureString). Pacchetto: `python3 scripts/bui
 poi `sam build/deploy` con Python 3.12. Rollback: `deleteWebhook` su Telegram e
 `aws cloudformation delete-stack --stack-name gymbot-telegram`. La concorrenza riservata del
 webhook non è utilizzabile (limite account): modifiche schedule concorrenti non sono serializzate.
-La schedule `gym-booking-mwf-0700` è `ENABLED` dal 18/11/2026: lunedì a mezzanotte (ora di Roma) prenota la sala attrezzi delle 07:00 di lunedì, mercoledì e venerdì di quella settimana. Il trigger punta alla versione 1 del guard, con retry 0. `/enable` dal bot resta bloccato. Un deploy richiede un'approvazione esplicita e non tocca `GymBooking-personale`.
+La schedule `gym-booking-mwf-0700` è `ENABLED` dal 18/11/2026: lunedì a mezzanotte (ora di Roma) prenota la sala attrezzi delle 07:00 di lunedì, mercoledì e venerdì di quella settimana (stato AWS; il codice dal 19/11/2026 prenota invece ogni giorno la lezione a sette giorni, in attesa di deploy). Il trigger punta alla versione 1 del guard, con retry 0. `/enable` dal bot resta bloccato. Un deploy richiede un'approvazione esplicita e non tocca `GymBooking-personale`.
 
 Il menu consente di consultare attività e impegni, scegliere giorno e lezione e
 confermare le operazioni; sono disponibili anche comandi testuali in `/help`. Le

@@ -222,7 +222,7 @@ nel bot: non premerla al posto dell'utente.
 
 - `/orari` mostra la griglia statica, senza chiamare il portale.
 - `/prefs` mostra le preferenze. `/prefs MON 07:00,12:30` imposta il giorno della lezione, in ordine
-  di priorità (prima le 07:00, poi le 12:30). Orari ammessi solo `07:00`, `12:30`, `18:15`.
+  di priorità (prima le 07:00, poi le 12:30). Orari ammessi: gli slot da un'ora del portale `07:00`, `08:00`, `12:30`, `13:30`, `18:15`, `19:15` (accetta anche `7`, `12.30`; giorni anche in italiano, es. `lun`). `/disponibilita` mostra la griglia slot liberi/pieni dei prossimi giorni.
   `/prefs MON off` toglie quel giorno. Giorni ammessi: `MON`, `TUE`, `WED`, `THU`, `FRI`.
 - Con preferenze salvate, un giorno assente non viene prenotato. Senza nessuna preferenza resta
   l'orario predefinito. Il primo slot con `Notes == "Prenota"` viene prenotato; gli altri non
@@ -235,7 +235,7 @@ nel bot: non premerla al posto dell'utente.
   e HTTP 200. Non ritentare l'update: un 4xx bloccherebbe la coda Telegram.
 - I corsi sono nel modello (`activity` per voce) ma oggi le preferenze accettano solo la sala
   attrezzi. Per prenotare un corso usare il flusso HTTP di questa skill, con conferma.
-- La schedule `gym-booking-mwf-0700` è `ENABLED` dal 2026-11-18: lunedì a mezzanotte (Europe/Rome) prenota le 07:00 di lunedì, mercoledì e venerdì di quella settimana. `/enable` dal bot resta bloccato (ADR 0002). Giorni e ora si cambiano solo a schedule `DISABLED`. Non disattivarla e non cambiare l'espressione senza una richiesta esplicita.
+- La schedule `gym-booking-mwf-0700` è `ENABLED` dal 2026-11-18 (stato AWS: lunedì a mezzanotte, Europe/Rome, 07:00 di lun/mer/ven della settimana). Il codice dal 2026-11-19 prenota invece ogni giorno la lezione a sette giorni se il giorno è in `/prefs`; l'espressione su AWS cambia solo col deploy. `/enable` dal bot resta bloccato (ADR 0002). Giorni e ora si cambiano solo a schedule `DISABLED`. Non disattivarla e non cambiare l'espressione senza una richiesta esplicita.
 - `/calendar` allinea gli impegni futuri (non i servizi, non la lista d'attesa) su Google Calendar.
   Prima la scrittura diretta, con promemoria a 12 ore e a 1 ora. Il file `.ics` parte solo se manca
   `~/.config/gymbooking/google-calendar.json` o se Google rifiuta la chiamata. Non importare il file

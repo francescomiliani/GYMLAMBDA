@@ -88,10 +88,9 @@ Risorse preesistenti, non gestite dallo stack: Lambda `GymBooking-personale`
 Dati nella stessa tabella DynamoDB (`state#prefs`, `state#skip#DATA`, `state#last_run`).
 
 - `/prefs` mostra, `/prefs MON 07:00,12:30` imposta (con conferma), `/prefs MON off` toglie il giorno.
-  Gli orari sono quelli della sala attrezzi (`timetable.GYM_SLOTS`) in ordine di priorita': prima
-  le 07:00, poi le 12:30. Il giorno e' quello della lezione. Il lunedì a mezzanotte
-  prenota tre date di quella settimana; gli altri trigger prenotano lo stesso giorno
-  sette giorni dopo.
+  Gli orari sono i sei slot da un'ora della sala attrezzi (`timetable.GYM_SLOTS`: 07:00, 08:00, 12:30, 13:30, 18:15, 19:15; `/disponibilita` ne mostra la griglia dal vivo) in ordine di priorita': prima
+  le 07:00, poi le 12:30. Il giorno e' quello della lezione. Il guard (dal 2026-11-19)
+  prenota ogni giorno lo stesso giorno sette giorni dopo, solo se è in preferenza.
 - `scheduled_guard` legge le preferenze prima del claim e chiama `app.book` con la lista ordinata
   (`fallback_times`): vale il primo slot con `Notes == 'Prenota'`, senza POST su slot non prenotabili.
   Giorno senza preferenze (con preferenze presenti) oppure data in `/skip`: nessuna prenotazione e
