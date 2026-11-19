@@ -1,6 +1,6 @@
 ---
 name: gymbooking
-description: Gestisce la palestra Reply Wellness sul portale Sportrick con richieste HTTP dirette (curl), senza Lambda. Usare per elencare corsi, vedere il calendario, controllare gli impegni, prenotare o cancellare una lezione, entrare o uscire dalla lista d'attesa. Trigger - palestra, gym, Sportrick, Reply Wellness, prenota/cancella lezione, "cosa ho prenotato", lista d'attesa. Use for booking gym classes on Sportrick.
+description: Gestisce la palestra Reply Wellness sul portale Sportrick con richieste HTTP dirette (curl), senza Lambda. Usare per elencare corsi, vedere il calendario, controllare gli impegni, prenotare o cancellare una lezione, entrare o uscire dalla lista d'attesa, e per orari, preferenze con fallback, skip, stato e calendario del bot Telegram. Trigger - palestra, gym, Sportrick, Reply Wellness, prenota/cancella lezione, "cosa ho prenotato", lista d'attesa, /orari, /prefs, /skip, /status, /calendar. Use for booking gym classes on Sportrick.
 ---
 
 # GymBooking via HTTP
@@ -165,6 +165,28 @@ try:
     print('sns: accepted')
 except Exception:
     print('sns: failed')
+if kind == 'book':
+    try:
+        import sys
+        root = next(p for p in (Path.cwd() / 'lambda_function',
+                                Path.home() / 'personal-projects' / 'GYMLAMBDA' / 'lambda_function')
+                    if (p / 'google_calendar.py').is_file())
+        sys.path.insert(0, str(root))
+        import google_calendar
+        outcome = google_calendar.publish(
+            {'date': date, 'time': time, 'course': course, 'description': course},
+            path=cfg / 'google-calendar.json')
+        print('calendar:', outcome['channel'])
+        if outcome.get('ics') and (cfg / 'telegram-token').is_file() and (cfg / 'telegram-chat-id').is_file():
+            import calendar_ics
+            body, ctype = calendar_ics.document_body(
+                (cfg / 'telegram-chat-id').read_text().strip(), 'palestra.ics', outcome['ics'], 'Palestra')
+            req = urllib.request.Request(
+                f"https://api.telegram.org/bot{(cfg / 'telegram-token').read_text().strip()}/sendDocument",
+                body, {'Content-Type': ctype})
+            print('calendar-file:', 'accepted' if json.load(urllib.request.urlopen(req, timeout=15)).get('ok') is True else 'failed')
+    except Exception:  # può contenere un token: non stamparla
+        print('calendar: failed')
 PY
 }
 ```
@@ -178,6 +200,54 @@ Messaggi (stessi per entrambi i canali, corso/data/ora dall'impegno confermato):
 | `wl_join` | `⏳ Sei in lista d'attesa!` / ... / `Dita incrociate 🤞🍀` |
 | `wl_leave` | `👋 Uscito dalla lista d'attesa` / ... / `Nessun rimpianto 😌` |
 
+## Orari di riferimento
+
+Foto ufficiale: `docs/reference/orari-palestra-2026-11.png` (tabelle in `docs/reference/orari-palestra.md`,
+dati in `lambda_function/timetable.py`, verificata il 2026-11-18). Sala attrezzi lun-ven 07:00-09:00,
+12:30-14:30, 18:15-20:15. Sala corsi, per orientarsi: lun 13:00 GAG e 18:30 Functional Training;
+mar 08:00 Functional Training, 13:00 Total Body, 18:30 Yoga; mer 13:00 Cross Training e 18:30 Total Body;
+gio 08:00 Cross Training, 13:00 Functional Training, 18:30 Pilates; ven 12:30 Cross Training,
+13:30 Functional Training, 18:30 Functional Training. Se la foto cambia, aggiornare `GYM_SLOTS`,
+`COURSES`, la tabella e la skill.
+
+La sala attrezzi nel client è l'attività `224715757956816031` (`timetable.GYM_ACTIVITY_ID`).
+Confermare nome e `data-flags` dal catalogo prima di usarla. Per disponibilità e `AppointmentId`
+vale sempre `GetActivitySchedule`: la tabella non dice se uno slot è libero.
+
+## Bot Telegram (preferenze, skip, stato)
+
+L'automazione non ha un endpoint Sportrick. Non inventare una richiesta HTTP per preferenze o skip,
+e non invocare la Lambda. I comandi stanno nel bot (webhook AWS). Ogni modifica chiede conferma
+nel bot: non premerla al posto dell'utente.
+
+- `/orari` mostra la griglia statica, senza chiamare il portale.
+- `/prefs` mostra le preferenze. `/prefs MON 07:00,12:30` imposta il giorno della lezione, in ordine
+  di priorità (prima le 07:00, poi le 12:30). Orari ammessi: gli slot da un'ora del portale `07:00`, `08:00`, `12:30`, `13:30`, `18:15`, `19:15` (accetta anche `7`, `12.30`; giorni anche in italiano, es. `lun`). `/disponibilita` mostra la griglia slot liberi/pieni dei prossimi giorni.
+  `/prefs MON off` toglie quel giorno. Giorni ammessi: `MON`, `TUE`, `WED`, `THU`, `FRI`.
+- Con preferenze salvate, un giorno assente non viene prenotato. Senza nessuna preferenza resta
+  l'orario predefinito. Il primo slot con `Notes == "Prenota"` viene prenotato; gli altri non
+  ricevono un POST.
+- `/skip YYYY-MM-DD` salta la lezione di quella data, `/skip off YYYY-MM-DD` la riattiva.
+  Vale anche per oggi; una data nel passato viene rifiutata.
+- `/status` è sola lettura: schedule, prossima esecuzione, preferenze, ultima esecuzione,
+  date saltate, coda Telegram. «1 update in coda» durante `/status` è il comando ancora in corso.
+- Un comando non valido riceve il motivo (`Uso: ...`, `Giorno non valido`, `Orari ammessi`)
+  e HTTP 200. Non ritentare l'update: un 4xx bloccherebbe la coda Telegram.
+- I corsi sono nel modello (`activity` per voce) ma oggi le preferenze accettano solo la sala
+  attrezzi. Per prenotare un corso usare il flusso HTTP di questa skill, con conferma.
+- La schedule `gym-booking-mwf-0700` è `ENABLED` dal 2026-11-18 (stato AWS: lunedì a mezzanotte, Europe/Rome, 07:00 di lun/mer/ven della settimana). Il codice dal 2026-11-19 prenota invece ogni giorno la lezione a sette giorni se il giorno è in `/prefs`; l'espressione su AWS cambia solo col deploy. `/enable` dal bot resta bloccato (ADR 0002). Giorni e ora si cambiano solo a schedule `DISABLED`. Non disattivarla e non cambiare l'espressione senza una richiesta esplicita.
+- `/calendar` allinea gli impegni futuri (non i servizi, non la lista d'attesa) su Google Calendar.
+  Prima la scrittura diretta, con promemoria a 12 ore e a 1 ora. Il file `.ics` parte solo se manca
+  `~/.config/gymbooking/google-calendar.json` o se Google rifiuta la chiamata. Non importare il file
+  se la scrittura è riuscita: un secondo import può duplicare. Cancellare sul portale non toglie un
+  evento importato da file; la cancellazione confermata toglie l'evento Google quando l'id è noto.
+  Il JSON non si stampa né si committa. Sulla Lambda il nome del parametro è `/gymbot/google-calendar`.
+  L'app OAuth è In production dal 2026-11-18 (homepage `https://francescomiliani.github.io/gymbooking/`).
+  Lo scope calendario non è ancora verificato da Google: un consenso nuovo può mostrare l'avviso
+  «app non verificata».
+- `notify book` prova la stessa scrittura. Il segreto non si stampa. Un errore di calendario non
+  cambia l'esito della prenotazione.
+
 ## Flussi tipici
 
 - **"Cosa ho prenotato?"** login, impegni, tabella (data, ora, corso, lista d'attesa).
@@ -185,6 +255,8 @@ Messaggi (stessi per entrambi i canali, corso/data/ora dall'impegno confermato):
   chiedere conferma, prenotare, rileggere impegni, notificare, riferire.
 - **"Cancella ..."** impegni, individuare l'impegno, chiedere conferma, cancellare, verificare, notificare.
 - **Lezione piena** proporre la lista d'attesa, mai insistere con `BookAppointment`.
+- **Preferenze o un giorno da saltare** sono comandi del bot (`/prefs`, `/skip`), non prenotazioni
+  sul portale. Preparare il comando e lasciare la conferma all'utente.
 - **Notificare**: `notify book 2026-11-19 18:30 "PILATES"` (tipi: `book`, `cancel`, `wl_join`, `wl_leave`).
 
 Report finale sempre con l'esito: confermato, rifiutato o incerto. A fine lavoro `rm -f "$CJ"`.
