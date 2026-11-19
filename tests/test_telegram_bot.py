@@ -346,6 +346,39 @@ class TelegramBotTests(unittest.TestCase):
             self.assertIn('12:30, 07:00', self.last()['text'])
             store.put_state.assert_not_called()  # nessuna modifica prima della conferma
 
+    def test_waitlist_switch_shows_state_and_asks_confirmation(self):
+        with patch.object(telegram_bot, '_store') as factory:
+            store = factory.return_value
+            store.get_state.return_value = None
+            self.message['text'] = '/waitlist'
+            self.assertEqual(self.invoke(), 200)
+            self.assertIn('🟢 attiva', self.last()['text'])
+            store.get_state.return_value = {'enabled': False}
+            self.assertEqual(self.invoke(), 200)
+            self.assertIn('spenta', self.last()['text'])
+            store.create_confirmation_once.return_value = 'opaque'
+            self.message['text'] = '/waitlist off'
+            self.assertEqual(self.invoke(), 200)
+            self.assertEqual(store.create_confirmation_once.call_args.args[1], {'action': 'waitlist_auto', 'enabled': False})
+            self.assertIn('Attiva: no', self.last()['text'])
+            store.put_state.assert_not_called()  # niente modifica prima della conferma
+            self.message['text'] = '/waitlist maybe'
+            self.assertEqual(self.invoke(), 200)
+            self.assertIn('Uso: /waitlist', self.last()['text'])
+
+    def test_waitlist_callback_writes_the_switch_once_confirmed(self):
+        for enabled in (False, True):
+            with patch.object(telegram_bot, '_store') as factory:
+                store = factory.return_value
+                job = {'status': 'pending', 'payload': {'action': 'waitlist_auto', 'enabled': enabled}}
+                store.consume_confirmation.return_value = job
+                store.should_dispatch.return_value = True
+                store.claim_job.return_value = job
+                self.assertEqual(self.callback('opaque'), 200)
+                store.put_state.assert_called_once_with('waitlist_auto', {'enabled': enabled})
+                store.finish_job.assert_called_once_with('opaque', 'completed', {'status': 'confirmed'})
+                self.assertIn('attivata' if enabled else 'spenta', self.last()['text'])
+
     def test_prefs_callback_writes_state_once_confirmed(self):
         with patch.object(telegram_bot, '_store') as factory:
             store = factory.return_value

@@ -69,6 +69,7 @@ def vevent(item, now):
         f'DTEND:{_stamp(end)}',
         f'SUMMARY:{_escape(summary)}',
         'LOCATION:Reply Wellness',
+        'COLOR:green',
         'END:VEVENT',
     ])
 

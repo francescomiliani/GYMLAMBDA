@@ -17,14 +17,14 @@ if __package__:
     from . import telegram_worker, timetable
     from .bot_scheduler import BotScheduler, fingerprint
     from .store_conflict import StoreConflict
-    from .sportrick import require_date, require_id
+    from .sportrick import WAITLIST_NOTE, require_date, require_id
     from .ssm_config import get_secret
 else:
     import telegram_worker
     import timetable
     from bot_scheduler import BotScheduler, fingerprint
     from store_conflict import StoreConflict
-    from sportrick import require_date, require_id
+    from sportrick import WAITLIST_NOTE, require_date, require_id
     from ssm_config import get_secret
 
 
@@ -39,6 +39,7 @@ HELP = ('📖 Cosa posso fare\n\n'
         '   es. /prefs lun 07:00,08:00 (prima le 7, se è pieno le 8)\n'
         '   es. /prefs ven 7 · /prefs mer off\n'
         '• /skip 2026-11-25: salta un giorno · /skip off 2026-11-25: riprendi\n'
+        '• /waitlist: lista d’attesa automatica (se la prima scelta è piena) · /waitlist off o /waitlist on\n'
         '• /automation: quando parte e cosa fa · /disable: sospendi\n\n'
         '🔧 Avanzati: /activities, /schedule ID DATA, /book, /cancel ID, /waitlist_join, '
         '/waitlist_leave ID, /waitlist_confirm ID, /calendar. '
@@ -180,7 +181,7 @@ def _handle_message(message, token, owner, update_id=None):
         return
     command = parts[0]
     chat_id = message['chat']['id']
-    if command in ('/disable', '/prefs', '/skip') or (command.startswith('/') and command[1:] in MUTATIONS):
+    if command in ('/disable', '/prefs', '/skip', '/waitlist') or (command.startswith('/') and command[1:] in MUTATIONS):
         if type(update_id) is not int or update_id < 0:
             raise ValueError('Update ID non valido')
     if command in ('/start', '/help'):
@@ -200,6 +201,8 @@ def _handle_message(message, token, owner, update_id=None):
         _send(token, chat_id, _status_text(token))
     elif command == '/calendar' and len(parts) == 1:
         _run_ui(token, chat_id, owner, {'kind': 'calendar'})
+    elif command == '/waitlist':
+        _waitlist_toggle(parts, token, chat_id, owner, update_id)
     elif command in ('/prefs', '/skip'):
         _prefs_or_skip(command, parts, token, chat_id, owner, update_id)
     elif command in ('/bookings', '/activities', '/schedule'):
@@ -237,6 +240,23 @@ def _handle_message(message, token, owner, update_id=None):
         _confirm(token, chat_id, owner, payload, update_id, store)
     elif command[1:] in MUTATIONS and command.startswith('/'):
         _confirm(token, chat_id, owner, _command(text), update_id)
+
+
+def _waitlist_enabled(store):
+    """Lista d'attesa automatica: accesa salvo un `enabled: false` esplicito."""
+    return (store.get_state('waitlist_auto') or {}).get('enabled') is not False
+
+
+def _waitlist_toggle(parts, token, chat_id, owner, update_id):
+    if len(parts) == 1:
+        on = _waitlist_enabled(_store())
+        _send(token, chat_id, '⏳ Lista d’attesa automatica: ' + ('🟢 attiva' if on else '⏸️ spenta')
+              + '\nSe la prima scelta è piena, prenoto il ripiego libero ed entro anche in lista sulla prima scelta.'
+              + '\n✏️ Cambia: /waitlist ' + ('off' if on else 'on'))
+        return
+    if len(parts) != 2 or parts[1].lower() not in ('on', 'off'):
+        raise ValueError('Uso: /waitlist on oppure /waitlist off. ')
+    _confirm(token, chat_id, owner, {'action': 'waitlist_auto', 'enabled': parts[1].lower() == 'on'}, update_id)
 
 
 def _prefs_or_skip(command, parts, token, chat_id, owner, update_id):
@@ -402,6 +422,7 @@ def _status_text(token):
 
     section('⚙️ Automazione', schedule)
     section('⭐ Preferenze', lambda: timetable.format_prefs(_store().get_state('prefs')))
+    section('⏳ Lista d’attesa automatica', lambda: 'attiva' if _waitlist_enabled(_store()) else 'spenta')
     section('🕘 Ultima esecuzione', last_run)
     section('⏭️ Date saltate (prossimi 14 giorni)', skips)
     section('🔌 Telegram', webhook)
@@ -420,12 +441,15 @@ def _confirmation_message(owner, payload, update_id, store=None, summary=None, e
     names = {'book': 'Prenotazione', 'cancel': 'Cancellazione', 'waitlist_join': 'Ingresso in lista d’attesa',
              'waitlist_leave': 'Uscita dalla lista d’attesa', 'waitlist_confirm': 'Conferma dalla lista d’attesa',
              'disable': 'Disabilitazione automazione',
-             'prefs': 'Preferenze di prenotazione', 'skip': 'Occorrenza dell’automazione'}
+             'prefs': 'Preferenze di prenotazione', 'skip': 'Occorrenza dell’automazione',
+             'waitlist_auto': 'Lista d’attesa automatica'}
     labels = {'activity_id': 'ID attività', 'date': 'Data', 'appointment_id': 'ID appuntamento',
               'booking_id': 'ID impegno', 'days': 'Giorni', 'hour': 'Ora', 'minute': 'Minuti',
-              'day': 'Giorno', 'times': 'Orari in ordine di priorità'}
+              'day': 'Giorno', 'times': 'Orari in ordine di priorità', 'enabled': 'Attiva'}
 
     def value(key):
+        if isinstance(payload[key], bool):
+            return 'sì' if payload[key] else 'no'
         if isinstance(payload[key], list):
             return ', '.join(payload[key]) or 'nessuna prenotazione'
         return payload[key]
@@ -433,6 +457,8 @@ def _confirmation_message(owner, payload, update_id, store=None, summary=None, e
     details = '\n'.join(f'{label}: {value(key)}' for key, label in labels.items() if key in payload)
     if payload['action'] == 'skip':
         details += '\nEffetto: ' + ('non prenotare questa data' if payload['skipped'] else 'riprendi a prenotare questa data')
+    if payload['action'] == 'waitlist_auto':
+        details += '\nEffetto: ' + ('se la prima scelta è piena entro anche in lista d’attesa' if payload['enabled'] else 'nessuna lista d’attesa automatica')
     if summary:
         details = summary + '\n' + details
     return ('🤔 Confermi: ' + names[payload['action']] + '?\n' + details +
@@ -443,7 +469,6 @@ def _confirmation_message(owner, payload, update_id, store=None, summary=None, e
 
 TIMEZONE = 'Europe/Rome'
 WEEKDAYS = ('Lun', 'Mar', 'Mer', 'Gio', 'Ven', 'Sab', 'Dom')
-WAITLIST_NOTE = "Lezione al completo. Vuoi metterti in lista d'attesa?"
 BUTTON_LIMIT = 20
 CALLBACK_LIMIT = 64
 
@@ -883,7 +908,7 @@ def _handle_callback(update, callback, token, owner):
     if action in MUTATIONS:
         _dispatch(data)
         _send(token, chat_id, '📨 Operazione accettata dal worker. Verifica gli impegni per conoscere l’esito.')
-    elif action in ('prefs', 'skip'):
+    elif action in ('prefs', 'skip', 'waitlist_auto'):
         try:
             job = store.claim_job(data)
         except StoreConflict:
@@ -893,6 +918,8 @@ def _handle_callback(update, callback, token, owner):
             payload = job['payload']
             if action == 'prefs':
                 store.put_state('prefs', timetable.set_day(store.get_state('prefs'), payload['day'], payload['times']))
+            elif action == 'waitlist_auto':
+                store.put_state('waitlist_auto', {'enabled': payload['enabled'] is True})
             else:
                 store.put_state('skip#' + payload['date'], {'skipped': payload['skipped']},
                                 purge_at=int(time.time()) + 30 * 86400)
@@ -904,7 +931,11 @@ def _handle_callback(update, callback, token, owner):
                 pass
             _send(token, chat_id, '⚠️ Esito incerto: verifica con /prefs o /status prima di riprovare.')
         else:
-            _send(token, chat_id, '✅ Preferenze aggiornate.' if action == 'prefs' else '✅ Occorrenza aggiornata.')
+            if action == 'waitlist_auto':
+                done = '✅ Lista d’attesa automatica ' + ('attivata.' if payload['enabled'] else 'spenta.')
+            else:
+                done = '✅ Preferenze aggiornate.' if action == 'prefs' else '✅ Occorrenza aggiornata.'
+            _send(token, chat_id, done)
     elif action == 'disable':
         try:
             job = store.claim_job(data)

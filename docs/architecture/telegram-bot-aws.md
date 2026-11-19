@@ -3,7 +3,7 @@ title: Telegram bot on AWS
 type: architecture
 status: canonical
 owner: gymbooking
-last-verified: 2026-11-18
+last-verified: 2026-11-19
 relevant-code:
   - bot-template.yaml
   - lambda_function/telegram_bot.py
@@ -11,6 +11,7 @@ relevant-code:
   - lambda_function/bot_store.py
   - lambda_function/bot_scheduler.py
   - lambda_function/scheduled_guard.py
+  - lambda_function/waitlist_watch.py
   - lambda_function/ssm_config.py
   - lambda_function/app.py
   - lambda_function/sportrick.py
@@ -56,6 +57,7 @@ verificare prima di operare.
 | Lambda webhook (`telegram_bot`) | Function URL pubblica `AuthType: NONE`. Verifica secret e utente autorizzato, registra conferme, accoda lavoro. Risponde 403 senza secret, 405 su GET. |
 | Lambda worker (`telegram_worker`) | Esegue letture e mutazioni in modo asincrono, notifica l'esito. Timeout 180 s, retry asincroni 0. |
 | Lambda guardia (`scheduled_guard`) | Target della schedule, versione 1. At-most-once per occorrenza. |
+| Lambda `waitlist_watch` | Schedule `gymbot-waitlist-watch` (30 minuti, 06:00-22:30). Solo letture sul portale; avvisa quando una voce passa da lista a partecipante. Timeout 60 s, retry 0. Risorse in `infra/terraform/waitlist_watch.tf`, non nello stack SAM. |
 | DynamoDB | Una tabella provisioned 1 RCU / 1 WCU, TTL su `purge_at`. Conferme, deduplica, stato dei job. |
 | SSM Parameter Store | Cinque `SecureString` Standard `/gymbot/*`, chiave AWS managed `alias/aws/ssm`, lette a runtime da `ssm_config.get_secret`. |
 | CloudWatch Logs | Un log group per funzione, retention 7 giorni. |
@@ -107,10 +109,11 @@ Sezione verificata sul codice e sui test il 2026-11-18. Lo stesso giorno lo stac
 ## Calendario
 
 `/calendar` legge gli impegni e scrive su Google Calendar (`primary`) le lezioni ancora aperte.
-Promemoria popup a 12 ore e a 1 ora, fuso `Europe/Rome`. Servizi e liste d'attesa restano fuori.
+Promemoria popup a 12 ore e a 1 ora, fuso `Europe/Rome`, evento verde (`colorId` 10). Servizi e liste d'attesa restano fuori.
+Un evento già salvato senza colore (`state#gcal#<id>` senza `color`) viene ricolorato con un `PATCH` al primo passaggio da `publish`/`sync`; se il `PATCH` fallisce l'evento resta com'è e si riprova.
 L'id dell'evento sta in `state#gcal#<id>` e la stessa `iCalUID` (`gymbooking-<id>@gymbooking`) evita
-un secondo evento se skill e Lambda scrivono entrambi. Senza segreto, o se la chiamata fallisce,
-il bot manda solo allora un file `.ics`: un import ripetuto può duplicare, e cancellare sul
+un secondo evento se skill e Lambda scrivono entrambi. `publish` restituisce sempre il file `.ics` e ogni prenotazione confermata lo invia su Telegram, anche quando Google ha accettato la scrittura (Google deduplica per `iCalUID`). Il comando `/calendar` lo manda invece solo per le voci che Google non ha preso. Senza segreto, o se la chiamata fallisce,
+il file è l'unico canale: un import ripetuto può duplicare, e cancellare sul
 portale non toglie un evento importato da file. La cancellazione confermata cancella l'evento
 Google quando l'id è noto.
 
@@ -131,6 +134,26 @@ Google segnala comunque che lo scope `calendar.events` va sottoposto a verifica:
 è stata inviata.
 
 Sezione verificata sul codice, sui test e sul parametro SSM il 2026-11-18.
+
+## Lista d'attesa
+
+- **Prenotazione automatica.** Il guard aggiunge `waitlist: true` all'evento. `app.book` prenota il primo
+  orario libero e, se la prima scelta è piena (`Notes` = `WAITLIST_NOTE`), chiama `SportrickClient.waitlist_join`
+  nella stessa sessione: prima il posto libero, poi la lista. Esiti: prenotazione con `waitlist` (`confirmed`,
+  `rejected`, `uncertain`), oppure `status: waitlisted` se non c'era posto libero. Un esito incerto sulla sola
+  lista è un errore (il guard segna l'occorrenza `uncertain`) e non si ritenta.
+- **Interruttore.** `/waitlist on|off` scrive `state#waitlist_auto` (`enabled`, acceso se assente) dopo conferma; il guard lo legge prima del claim e, se spento, non aggiunge `waitlist` all'evento. Il controllo delle promozioni resta attivo (schedule governata da `waitlist_watch_enabled`).
+- **Promozione.** `waitlist_watch` salva in `state#waitlist_seen` le voci in lista dell'ultima lettura
+  (chiave data e ora). Una voce che scompare dalla lista e compare tra gli impegni confermati è promossa: invia
+  il messaggio, scrive il calendario, manda il `.ics` e poi aggiorna lo stato. Se l'invio Telegram fallisce lo
+  stato non cambia e si riprova alla lettura successiva (al peggio un doppione, mai un avviso perso). La prima
+  lettura registra e basta. Per `canMoveToAttendants` offre una volta il pulsante di conferma.
+- **Doppio impegno.** Se lo stesso giorno ci sono altri impegni, i pulsanti `bc:<id>:<sid>` passano dal flusso
+  di conferma persistente del bot.
+- **Perché il polling.** L'email del Wellness Team arriva alla casella Reply: servirebbero un dominio con MX per
+  SES (non gratis) oppure Gmail con push Pub/Sub, nuovo consenso e rinnovo del watch. Il polling costa 0 e vede
+  anche le liste fatte dal sito. Ritardo massimo 30 minuti.
+- Nessun login sul portale se non alla lettura: la Lambda non prenota, non cancella e non esce dalle liste.
 
 ## Schedule
 

@@ -114,6 +114,8 @@ La lista d'attesa può prenotare automaticamente o consumare crediti, secondo le
 - **Confermare il posto** (`canMoveToAttendants`): `POST $BASE/Booking/MoveToAttendants` form `appointmentId=<id impegno>`
   (non ancora provato dal vivo: serve un posto liberato).
 
+**Automatico (bot, dal codice del 2026-11-19, in attesa di deploy).** A mezzanotte il guard prenota il primo orario libero tra i ripieghi e, se la prima scelta è piena, entra anche nella sua lista d'attesa; se sono tutti pieni entra solo in lista. L'automatismo si accende o spegne con `/waitlist on|off` (`/waitlist` mostra lo stato; conferma come per `/prefs`). La Lambda `waitlist_watch` (ogni 30 minuti, 06:00-22:30) avvisa su Telegram quando si passa da lista a partecipante, scrive l'evento su Google Calendar e manda il `.ics`; con un altro impegno lo stesso giorno propone di cancellarne uno. L'email del Wellness Team non viene letta.
+
 Dopo l'ingresso l'impegno compare in `GetCustomerAppointments` con `isOnWaitlist == true` e
 `canDeleteFromWaitlist == true`; usare l'`id` letto lì per uscire e rileggere gli impegni per verificare.
 Provato dal vivo: ingresso `OK` ("Aggiunto alla lista d'attesa!"), uscita `OK`.
@@ -237,9 +239,10 @@ nel bot: non premerla al posto dell'utente.
   attrezzi. Per prenotare un corso usare il flusso HTTP di questa skill, con conferma.
 - La schedule `gym-booking-mwf-0700` è `ENABLED` dal 2026-11-18 (stato AWS: lunedì a mezzanotte, Europe/Rome, 07:00 di lun/mer/ven della settimana). Il codice dal 2026-11-19 prenota invece ogni giorno la lezione a sette giorni se il giorno è in `/prefs`; l'espressione su AWS cambia solo col deploy. `/enable` dal bot resta bloccato (ADR 0002). Giorni e ora si cambiano solo a schedule `DISABLED`. Non disattivarla e non cambiare l'espressione senza una richiesta esplicita.
 - `/calendar` allinea gli impegni futuri (non i servizi, non la lista d'attesa) su Google Calendar.
-  Prima la scrittura diretta, con promemoria a 12 ore e a 1 ora. Il file `.ics` parte solo se manca
-  `~/.config/gymbooking/google-calendar.json` o se Google rifiuta la chiamata. Non importare il file
-  se la scrittura è riuscita: un secondo import può duplicare. Cancellare sul portale non toglie un
+  Prima la scrittura diretta, con promemoria a 12 ore e a 1 ora, evento verde (`colorId` 10; gli eventi già scritti
+  si ricolorano da soli al primo passaggio). Per `/calendar` il file `.ics` parte solo se manca
+  `~/.config/gymbooking/google-calendar.json` o se Google rifiuta la chiamata; `notify book` e le prenotazioni del bot
+  lo mandano sempre. Non importare il file se Google ha già l'evento: un secondo import può duplicare. Cancellare sul portale non toglie un
   evento importato da file; la cancellazione confermata toglie l'evento Google quando l'id è noto.
   Il JSON non si stampa né si committa. Sulla Lambda il nome del parametro è `/gymbot/google-calendar`.
   L'app OAuth è In production dal 2026-11-18 (homepage `https://francescomiliani.github.io/gymbooking/`).

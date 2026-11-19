@@ -32,6 +32,7 @@ ALLOWLIST = (
     'telegram_bot.py',
     'telegram_worker.py',
     'timetable.py',
+    'waitlist_watch.py',
 )
 # The legacy function GymBooking-personale only needs the booking client.
 LEGACY_ALLOWLIST = ('app.py', 'sportrick.py', 'ssm_config.py')

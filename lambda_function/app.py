@@ -5,10 +5,10 @@ import re
 from zoneinfo import ZoneInfo
 
 if __package__:
-    from .sportrick import SportrickClient, require_date, require_id
+    from .sportrick import WAITLIST_NOTE, SportrickClient, require_date, require_id
     from .ssm_config import get_secret
 else:
-    from sportrick import SportrickClient, require_date, require_id
+    from sportrick import WAITLIST_NOTE, SportrickClient, require_date, require_id
     from ssm_config import get_secret
 
 # Il runtime Lambda vive in UTC: la data va calcolata nel fuso della palestra,
@@ -37,7 +37,7 @@ def lambda_handler(event, context):
     try:
         if event.get('inspect'):
             return inspect(body_login, research_date)
-        return notify(book(body_login, research_date, times))
+        return notify(book(body_login, research_date, times, waitlist=event.get('waitlist') is True))
     except (requests.RequestException, ValueError, KeyError, TypeError, IndexError):
         raise RuntimeError('Sportrick request or response failed') from None
 
@@ -115,8 +115,20 @@ def _calendar_side(result, action):
 # La notifica non deve mai far fallire una prenotazione già confermata.
 def notify(result, action='book'):
     label = 'cancellazione confermata' if action == 'cancel' else 'prenotazione confermata'
-    suffix, ics = _calendar_side(result, action)
+    waitlisted = action == 'book' and result.get('status') == 'waitlisted'
+    if waitlisted:
+        # Solo lista d'attesa: nessun impegno, quindi niente evento in calendario.
+        label = "in lista d'attesa"
+        suffix, ics = '', None
+    else:
+        suffix, ics = _calendar_side(result, action)
     message = f"{result['date']} {result['time']} - {result.get('course') or 'SALA ATTREZZI'} - {label}" + suffix
+    wait = result.get('waitlist')
+    if action == 'book' and not waitlisted and isinstance(wait, dict):
+        message += {
+            'confirmed': f" Sono anche in lista d'attesa per le {wait.get('time')}: ti avviso se si libera un posto.",
+            'rejected': f" Lista d'attesa per le {wait.get('time')} non riuscita.",
+        }.get(wait.get('status'), f" Lista d'attesa per le {wait.get('time')} con esito incerto: verifica gli impegni.")
     notifications = {}
     topic = os.environ.get('SNS_TOPIC_ARN')
     if topic:
@@ -198,7 +210,26 @@ def inspect(body_login, research_date):
         return {'date': research_date, 'slots': slots, 'local_now': str(local_now())}
 
 
-def book(body_login, research_date, times):
+def _join_waitlist(session, entry):
+    """Lista d'attesa su uno slot pieno, nella sessione già autenticata. Mai solleva."""
+    start_time = entry.get('TimeStart')
+    try:
+        result = SportrickClient(session).waitlist_join(str(entry['AppointmentId']))
+    except ValueError:
+        return {'time': start_time, 'status': 'rejected'}
+    except (requests.RequestException, RuntimeError):
+        return {'time': start_time, 'status': 'uncertain'}
+    print(f'{start_time}: lista d\'attesa {result.get("status")}')
+    return {'time': start_time, 'status': result.get('status') or 'uncertain'}
+
+
+def book(body_login, research_date, times, waitlist=False):
+    """Prenota il primo orario libero di `times`.
+
+    Con waitlist=True, se la prima scelta è piena entra anche nella sua lista d'attesa:
+    prima il posto libero (più scarso), poi la lista. Senza posto libero ma con lista
+    confermata l'esito è 'waitlisted'.
+    """
     with requests.Session() as session:
         login(session, body_login)
         daily_activities = schedule(session, research_date) or []
@@ -206,27 +237,47 @@ def book(body_login, research_date, times):
         # affidabile è Notes == 'Prenota', altrimenti il POST viene rifiutato.
         # Il fallback prova solo gli slot prenotabili, senza mai mandare un POST a vuoto.
         rejected = []
+        entry = None
         for start_time in times:
-            entry = ([d for d in daily_activities if d['TimeStart'] == start_time] or [None])[0]
-            note = entry.get('Notes') if entry else 'orario non in calendario'
+            candidate = ([d for d in daily_activities if d['TimeStart'] == start_time] or [None])[0]
+            note = candidate.get('Notes') if candidate else 'orario non in calendario'
             if note == 'Prenota':
+                entry = candidate
                 break
             rejected.append(f'{start_time} ({note})')
-        else:
+        first = ([d for d in daily_activities if d['TimeStart'] == times[0]] or [None])[0]
+        wait_entry = first if (waitlist and first is not entry and first.get('Notes') == WAITLIST_NOTE
+                               and first.get('AppointmentId')) else None
+        if entry is None and wait_entry is None:
             raise RuntimeError(f'{research_date} non prenotabile: {", ".join(rejected)}')
-        appointmentID = entry['AppointmentId']
 
-        body_booking = {'appointmentID': appointmentID}
-        response_booking = session.post(booking_url, headers=headers_booking, data=body_booking, timeout=15)
-        response_booking.raise_for_status()
+        booked = booking_error = None
+        if entry is not None:
+            body_booking = {'appointmentID': entry['AppointmentId']}
+            response_booking = session.post(booking_url, headers=headers_booking, data=body_booking, timeout=15)
+            response_booking.raise_for_status()
 
-        message = response_booking.json().get('message')
-        if message == 'Prenotazione confermata con successo.':
-            print(f'{research_date} {start_time}: {message}')
-            return {'date': research_date, 'time': start_time, 'message': message}
-        # Il messaggio del portale non è un segreto: serve a distinguere
-        # "già prenotato" da "posti esauriti" senza indovinare.
-        raise RuntimeError(f'Booking was not confirmed: {message}')
+            message = response_booking.json().get('message')
+            if message == 'Prenotazione confermata con successo.':
+                print(f'{research_date} {start_time}: {message}')
+                booked = {'date': research_date, 'time': start_time, 'message': message}
+            else:
+                # Il messaggio del portale non è un segreto: serve a distinguere
+                # "già prenotato" da "posti esauriti" senza indovinare.
+                booking_error = f'Booking was not confirmed: {message}'
+        joined = _join_waitlist(session, wait_entry) if wait_entry is not None else None
+        if booked:
+            if joined:
+                booked['waitlist'] = joined
+            return booked
+        if joined and joined['status'] == 'confirmed':
+            return {'status': 'waitlisted', 'date': research_date, 'time': joined['time'], 'waitlist': joined,
+                    'message': booking_error or f'Nessun posto libero: {", ".join(rejected)}'}
+        if booking_error:
+            raise RuntimeError(booking_error)
+        if joined and joined['status'] == 'uncertain':
+            raise RuntimeError(f'{research_date}: lista d\'attesa con esito incerto')
+        raise RuntimeError(f'{research_date} non prenotabile: {", ".join(rejected)}')
 
 # Usa la funzione lambda_handler come punto di ingresso della Lambda
 # lambda_handler("", "")

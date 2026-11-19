@@ -6,6 +6,7 @@ owner: gymbooking
 last-verified: 2026-11-19
 relevant-code:
   - infra/terraform/
+  - infra/terraform/waitlist_watch.tf
   - infra/bootstrap/main.tf
   - infra/scripts/inventory.sh
   - infra/scripts/tf.sh
@@ -38,6 +39,10 @@ Tabella DynamoDB, tre Lambda del bot (webhook con Function URL, worker, guard), 
 `GymBooking-personale`, ruoli e policy IAM, log group (retention 7 giorni), topic SNS e iscrizione
 email, schedule `gym-booking-mwf-0700` con il suo ruolo. **Non** gestisce i cinque parametri SSM
 `/gymbot/*`: restano creati a mano (ADR 0001) e Terraform ne conosce solo i nomi.
+
+## Risorse nuove: controllo lista d'attesa
+
+`infra/terraform/waitlist_watch.tf` definisce risorse che non esistono nello stack SAM e quindi **non sono importate**: Lambda `gymbot-waitlist-watch`, ruolo e policy (DynamoDB Get/Put sulla tabella, SSM sui parametri del bot), ruolo dello scheduler che invoca solo questa funzione, log group e schedule `cron(0/30 6-22 * * ? *)` Europe/Rome con retry 0. `bot-template.yaml` non è stato esteso perché lo stack SAM sta per essere dismesso. Il primo `apply` le crea e carica il pacchetto corrente: costruirlo prima con `--with-deps` (`tf.sh` lo fa) e confrontare `CodeSize` delle Lambda prima e dopo, come nelle lezioni sopra. Stato iniziale della schedule: `waitlist_watch_enabled = true` (la funzione legge soltanto il portale); metterlo a `false` per crearla spenta. Un `plan` deve mostrare solo aggiunte.
 
 ## Struttura
 

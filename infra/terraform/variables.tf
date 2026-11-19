@@ -118,6 +118,26 @@ variable "legacy_function_name" {
   default = "GymBooking-personale"
 }
 
+# --- Controllo lista d'attesa (risorse nuove, non presenti nello stack SAM) ---
+
+variable "waitlist_watch_name" {
+  type        = string
+  default     = "gymbot-waitlist-watch"
+  description = "Nome di funzione, schedule e prefisso di ruoli e log group del controllo lista d'attesa."
+}
+
+variable "waitlist_watch_schedule" {
+  type        = string
+  default     = "cron(0/30 6-22 * * ? *)"
+  description = "Ogni 30 minuti dalle 06:00 alle 22:30 (Europe/Rome): circa 1.000 invocazioni al mese, nel free tier."
+}
+
+variable "waitlist_watch_enabled" {
+  type        = bool
+  default     = true
+  description = "La Lambda legge soltanto il portale e scrive su Telegram e Google Calendar: non prenota e non cancella."
+}
+
 variable "log_retention_days" {
   type    = number
   default = 7

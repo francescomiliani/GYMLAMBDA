@@ -3,7 +3,7 @@ title: AWS costs and free tier
 type: reference
 status: canonical
 owner: gymbooking
-last-verified: 2026-11-12
+last-verified: 2026-11-19
 relevant-code:
   - bot-template.yaml
 ---
@@ -19,6 +19,8 @@ rivalida prima di decisioni di spesa. Risorse descritte in
 | Servizio | Uso del bot | Quota gratuita | Fonte | Esito |
 |---|---|---|---|---|
 | Lambda | 3 funzioni, poche invocazioni al giorno | 1M richieste e 400.000 GB-s al mese | Pagina prezzi AWS Lambda (verificata) | Gratis |
+| Lambda `waitlist_watch` | Una invocazione ogni 30 minuti dalle 06:00 alle 22:30: 34 al giorno, circa 1.000 al mese, 128 MB, pochi secondi | Incluse nelle quote Lambda sopra | Calcolo sul codice, quota Lambda verificata | Gratis |
+| EventBridge Scheduler | Una schedule, circa 1.000 invocazioni al mese | 14 milioni di invocazioni al mese | Conoscenza generale, non riverificata | Gratis |
 | Function URL | Nessun costo a parte | Si pagano solo le invocazioni Lambda | Conoscenza generale, non riverificata | Gratis |
 | DynamoDB | 1 RCU, 1 WCU, pochi KB | 25 RCU, 25 WCU, 25 GB provisioned | Pagina prezzi AWS DynamoDB (verificata) | Gratis |
 | SSM Parameter Store | 4 parametri Standard | Nessun costo per Standard | Pagina prezzi AWS Systems Manager (verificata) | Gratis |

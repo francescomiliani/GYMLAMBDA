@@ -6,6 +6,7 @@ import requests
 
 
 BASE = 'https://ecomm.sportrick.com/replywellnessTO'
+WAITLIST_NOTE = "Lezione al completo. Vuoi metterti in lista d'attesa?"
 
 
 class CatalogParser(HTMLParser):

@@ -6,11 +6,11 @@ import requests
 
 if __package__:
     from . import timetable
-    from .sportrick import SportrickClient, require_date, require_id
+    from .sportrick import WAITLIST_NOTE, SportrickClient, require_date, require_id
     from .ssm_config import get_secret
 else:
     import timetable
-    from sportrick import SportrickClient, require_date, require_id
+    from sportrick import WAITLIST_NOTE, SportrickClient, require_date, require_id
     from ssm_config import get_secret
 
 
@@ -87,7 +87,7 @@ def run_job(job_id, store):
             elif action == 'waitlist_join':
                 slot = next((item for item in client.schedule(activity_id, date)
                              if item.get('AppointmentId') == appointment_id), None)
-                if not slot or slot.get('Type') != 'class' or slot.get('Notes') != "Lezione al completo. Vuoi metterti in lista d'attesa?":
+                if not slot or slot.get('Type') != 'class' or slot.get('Notes') != WAITLIST_NOTE:
                     raise ValueError('Lista d’attesa non disponibile')
                 result = client.waitlist_join(appointment_id)
             else:

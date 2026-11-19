@@ -47,6 +47,10 @@ class Http:
         self.calls.append(('delete', url))
         return Response(self.status, {})
 
+    def patch(self, url, json=None, headers=None, timeout=None):
+        self.calls.append(('patch', url, json))
+        return Response(self.status, {})
+
 
 class CalendarIcsTests(unittest.TestCase):
     def test_open_classes_become_one_utc_event(self):
@@ -65,7 +69,7 @@ class CalendarIcsTests(unittest.TestCase):
 
 
 class GoogleCalendarTests(unittest.TestCase):
-    def test_success_writes_once_and_does_not_return_a_file(self):
+    def test_success_writes_once_green_and_still_returns_the_file(self):
         http = Http()
         store = {}
 
@@ -80,13 +84,58 @@ class GoogleCalendarTests(unittest.TestCase):
             first = google_calendar.publish(FUTURE, Memory(), http, NOW)
             second = google_calendar.publish(FUTURE, Memory(), http, NOW)
         self.assertEqual(first['channel'], 'google')
-        self.assertIsNone(first['ics'])
+        self.assertIn('BEGIN:VEVENT', first['ics'])
+        self.assertIn('COLOR:green', first['ics'])
         self.assertEqual(store['gcal#42']['event_id'], 'evt-gymbooking-42@gymbooking')
         self.assertEqual(second['event_id'], store['gcal#42']['event_id'])
         self.assertEqual(len([call for call in http.calls if call[0] == 'post' and str(call[1]).endswith('/import')]), 1)
         body = next(call[2] for call in http.calls if str(call[1]).endswith('/import'))
         self.assertEqual(body['reminders']['overrides'], [{'method': 'popup', 'minutes': 720}, {'method': 'popup', 'minutes': 60}])
         self.assertEqual(body['start']['timeZone'], 'Europe/Rome')
+        self.assertEqual(body['colorId'], '10')
+        self.assertEqual(store['gcal#42']['color'], '10')
+        self.assertFalse(any(call[0] == 'patch' for call in http.calls))  # già verde: nessun PATCH
+
+    def test_existing_event_is_recolored_once(self):
+        http = Http()
+        store = {'gcal#42': {'event_id': 'old'}}
+
+        class Memory:
+            def get_state(self, key):
+                return store.get(key)
+
+            def put_state(self, key, value, purge_at=None):
+                store[key] = value
+
+        creds = {'client_id': 'c', 'client_secret': 's', 'refresh_token': 'r'}
+        with patch.object(google_calendar, 'load_credentials', return_value=creds):
+            first = google_calendar.publish(FUTURE, Memory(), http, NOW)
+            google_calendar.publish(FUTURE, Memory(), http, NOW)
+        patches = [call for call in http.calls if call[0] == 'patch']
+        self.assertEqual(len(patches), 1)
+        self.assertTrue(patches[0][1].endswith('/events/old'))
+        self.assertEqual(patches[0][2], {'colorId': '10'})
+        self.assertEqual(store['gcal#42'], {'event_id': 'old', 'color': '10'})
+        self.assertEqual(first['event_id'], 'old')
+        self.assertIn('BEGIN:VEVENT', first['ics'])
+        self.assertFalse(any(str(call[1]).endswith('/import') for call in http.calls))
+
+    def test_failed_recolor_keeps_the_event_and_retries_later(self):
+        http = Http(status=500)
+        store = {'gcal#42': {'event_id': 'old'}}
+
+        class Memory:
+            def get_state(self, key):
+                return store.get(key)
+
+            def put_state(self, key, value, purge_at=None):
+                store[key] = value
+
+        creds = {'client_id': 'c', 'client_secret': 's', 'refresh_token': 'r'}
+        with patch.object(google_calendar, 'load_credentials', return_value=creds):
+            outcome = google_calendar.publish(FUTURE, Memory(), http, NOW)
+        self.assertEqual(outcome['channel'], 'google')
+        self.assertEqual(store['gcal#42'], {'event_id': 'old'})  # senza colore: ritenterà
 
     def test_missing_secret_or_rejected_call_returns_ics_and_does_not_raise(self):
         with patch.object(google_calendar, 'load_credentials', return_value=None):

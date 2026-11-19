@@ -104,6 +104,29 @@ class TerraformTests(unittest.TestCase):
         self.assertEqual(len(re.findall(r'resource "aws_cloudwatch_log_group"', read('logs.tf'))), 3)
         self.assertRegex(read('variables.tf'), r'variable "log_retention_days" \{\s+type\s+= number\s+default\s+= 7')
 
+    def test_waitlist_watch_is_read_only_and_scoped(self):
+        text = read('waitlist_watch.tf')
+        function = block(text, 'resource "aws_lambda_function" "waitlist_watch"')
+        self.assertIn('waitlist_watch.lambda_handler', function)
+        self.assertIn('runtime       = "python3.12"', function)
+        self.assertIn('timeout       = 60', function)
+        policy = block(text, 'data "aws_iam_policy_document" "waitlist_watch"')
+        self.assertIn('local.ssm_all', policy)
+        self.assertNotIn('UpdateItem', policy)  # sola lettura/scrittura dello stato, niente conferme
+        self.assertNotIn('sns:', policy)
+        self.assertNotIn('scheduler:', policy)  # non tocca la schedule di prenotazione
+        scheduler_policy = block(text, 'data "aws_iam_policy_document" "waitlist_scheduler"')
+        self.assertIn('aws_lambda_function.waitlist_watch.arn', scheduler_policy)
+        self.assertNotIn('guard', scheduler_policy)
+        invoke = block(text, 'resource "aws_lambda_function_event_invoke_config" "waitlist_watch"')
+        self.assertIn('maximum_retry_attempts       = 0', invoke)
+        schedule = block(text, 'resource "aws_scheduler_schedule" "waitlist_watch"')
+        self.assertIn('"Europe/Rome"', schedule)
+        self.assertIn('mode = "OFF"', schedule)
+        self.assertIn('maximum_retry_attempts       = 0', schedule)
+        self.assertRegex(read('variables.tf'), r'variable "waitlist_watch_schedule" \{\s+type\s+= string\s+default\s+= "cron\(0/30 6-22 \* \* \? \*\)"')
+        self.assertNotIn('reserved_concurrent_executions', text)
+
     def test_backend_and_state_hygiene(self):
         backend = read('backend.tf')
         self.assertIn('use_lockfile = true', backend)

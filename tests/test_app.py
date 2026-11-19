@@ -217,5 +217,126 @@ class BookingTests(unittest.TestCase):
         self.assertEqual(calls[2].kwargs['data'], {'appointmentID': '123'})
 
 
+WAITLIST_NOTE = "Lezione al completo. Vuoi metterti in lista d'attesa?"
+WAITLIST_PAGE = '<input type="hidden" name="idImpegno" value="777"><button id="btnAggiungiListaAttesa">x</button>'
+
+
+class WaitlistBookingTests(unittest.TestCase):
+    def run_booking(self, slots, event, posts, page=WAITLIST_PAGE):
+        """posts: risposte dopo login e calendario (prenotazione e/o lista d'attesa)."""
+        login, activity = MagicMock(), MagicMock()
+        successful_login(login)
+        activity.json.return_value = {'data': slots}
+        session = session_with_login()
+        session.post.side_effect = [login, activity, *posts]
+        listing = MagicMock()
+        listing.text = page
+        listing.url = 'https://ecomm.sportrick.com/replywellnessTO/Booking/ConfirmActivityBooking'
+        session.get.side_effect = [session.get.return_value, listing]
+        env = {'SPORTRICK_USERNAME': 'u', 'SPORTRICK_PASSWORD': 'p', 'TELEGRAM_BOT_TOKEN': '', 'TELEGRAM_CHAT_ID': ''}
+        with patch.dict(os.environ, env), patch.object(app.requests, 'Session') as factory, \
+                patch.object(app, '_calendar_side', return_value=('', None)) as calendar, \
+                contextlib.redirect_stdout(io.StringIO()):
+            factory.return_value.__enter__.return_value = session
+            try:
+                result = app.lambda_handler(event, None)
+            except RuntimeError as error:
+                result = error
+        return result, session, calendar
+
+    @staticmethod
+    def reply(body):
+        response = MagicMock()
+        response.json.return_value = body
+        return response
+
+    FULL_THEN_FREE = [
+        {'TimeStart': '07:00', 'AppointmentId': '10', 'Notes': WAITLIST_NOTE},
+        {'TimeStart': '08:00', 'AppointmentId': '11', 'Notes': 'Prenota'},
+    ]
+
+    def test_full_first_choice_books_fallback_and_joins_waitlist(self):
+        booked = self.reply({'message': 'Prenotazione confermata con successo.'})
+        joined = self.reply({'status': 'OK', 'message': "Aggiunto alla lista d'attesa!"})
+        result, session, _ = self.run_booking(
+            self.FULL_THEN_FREE, {'date': '2026-11-20', 'time': '07:00', 'fallback_times': ['08:00'], 'waitlist': True},
+            [booked, joined])
+        self.assertEqual(result['time'], '08:00')
+        self.assertEqual(result['waitlist'], {'time': '07:00', 'status': 'confirmed'})
+        posts = session.post.call_args_list
+        self.assertEqual(posts[2].kwargs['data'], {'appointmentID': '11'})  # prima il posto libero
+        self.assertTrue(posts[3].args[0].endswith('/Booking/ConfirmAddToWaitList'))
+        self.assertEqual(posts[3].kwargs['data'], {'appointmentId': '777'})  # idImpegno, non l'id dello slot
+        self.assertEqual(session.get.call_args_list[1].kwargs['params'], {'appointmentID': '10'})
+
+    def test_all_full_only_waitlist_is_reported_as_waitlisted(self):
+        slots = [{'TimeStart': '07:00', 'AppointmentId': '10', 'Notes': WAITLIST_NOTE},
+                 {'TimeStart': '08:00', 'AppointmentId': '11', 'Notes': WAITLIST_NOTE}]
+        joined = self.reply({'status': 'OK'})
+        result, session, calendar = self.run_booking(
+            slots, {'date': '2026-11-20', 'time': '07:00', 'fallback_times': ['08:00'], 'waitlist': True}, [joined])
+        self.assertEqual(result['status'], 'waitlisted')
+        self.assertEqual(result['time'], '07:00')
+        self.assertNotIn('/Booking/BookAppointment', [c.args[0][-25:] for c in session.post.call_args_list[2:]])
+        calendar.assert_not_called()  # in lista non c'è impegno: niente evento
+
+    def test_without_the_flag_nothing_changes_for_a_full_slot(self):
+        result, session, _ = self.run_booking(
+            self.FULL_THEN_FREE[:1], {'date': '2026-11-20', 'time': '07:00'}, [])
+        self.assertIsInstance(result, RuntimeError)
+        self.assertEqual(session.post.call_count, 2)  # nessuna lista d'attesa senza richiesta
+
+    def test_free_first_choice_never_touches_the_waitlist(self):
+        slots = [{'TimeStart': '07:00', 'AppointmentId': '10', 'Notes': 'Prenota'}]
+        result, session, _ = self.run_booking(
+            slots, {'date': '2026-11-20', 'time': '07:00', 'waitlist': True},
+            [self.reply({'message': 'Prenotazione confermata con successo.'})])
+        self.assertNotIn('waitlist', result)
+        self.assertEqual(session.post.call_count, 3)
+
+    def test_rejected_waitlist_does_not_hide_the_booking(self):
+        booked = self.reply({'message': 'Prenotazione confermata con successo.'})
+        result, _, _ = self.run_booking(
+            self.FULL_THEN_FREE, {'date': '2026-11-20', 'time': '07:00', 'fallback_times': ['08:00'], 'waitlist': True},
+            [booked, self.reply({'status': 'ERROR', 'message': 'no'})])
+        self.assertEqual(result['time'], '08:00')
+        self.assertEqual(result['waitlist']['status'], 'rejected')
+
+    def test_missing_waitlist_button_is_rejected_without_a_post(self):
+        booked = self.reply({'message': 'Prenotazione confermata con successo.'})
+        result, session, _ = self.run_booking(
+            self.FULL_THEN_FREE, {'date': '2026-11-20', 'time': '07:00', 'fallback_times': ['08:00'], 'waitlist': True},
+            [booked], page='<p>niente</p>')
+        self.assertEqual(result['waitlist']['status'], 'rejected')
+        self.assertEqual(session.post.call_count, 3)
+
+    def test_uncertain_waitlist_alone_is_not_retried_and_is_an_error(self):
+        slots = [{'TimeStart': '07:00', 'AppointmentId': '10', 'Notes': WAITLIST_NOTE}]
+        broken = MagicMock()
+        broken.raise_for_status.side_effect = app.requests.RequestException('x')
+        result, session, _ = self.run_booking(slots, {'date': '2026-11-20', 'time': '07:00', 'waitlist': True}, [broken])
+        self.assertIsInstance(result, RuntimeError)
+        self.assertIn('incerto', str(result))
+        self.assertEqual(session.post.call_count, 3)
+
+    def test_notify_text_mentions_the_waitlist(self):
+        with patch.dict(os.environ, {'SNS_TOPIC_ARN': '', 'TELEGRAM_BOT_TOKEN': '', 'TELEGRAM_CHAT_ID': ''}), \
+                patch.object(app, '_calendar_side', return_value=('', None)):
+            both = {'date': '2026-11-20', 'time': '08:00', 'waitlist': {'time': '07:00', 'status': 'confirmed'}}
+            sent = {}
+            with patch.object(app.requests, 'post') as post:
+                post.return_value.json.return_value = {'ok': True}
+                with patch.dict(os.environ, {'TELEGRAM_BOT_TOKEN': 't', 'TELEGRAM_CHAT_ID': '1'}):
+                    app.notify(both)
+                    sent['both'] = post.call_args.kwargs['json']['text']
+                    app.notify({'status': 'waitlisted', 'date': '2026-11-20', 'time': '07:00',
+                                'waitlist': {'time': '07:00', 'status': 'confirmed'}})
+                    sent['only'] = post.call_args.kwargs['json']['text']
+        self.assertIn("lista d'attesa per le 07:00", sent['both'])
+        self.assertIn("2026-11-20 08:00", sent['both'])
+        self.assertIn("in lista d'attesa", sent['only'])
+        self.assertNotIn('prenotazione confermata', sent['only'])
+
+
 if __name__ == '__main__':
     unittest.main()

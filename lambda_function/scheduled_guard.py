@@ -71,6 +71,8 @@ def lambda_handler(event, context):
     else:
         from bot_store import BotStore
     state = BotStore(client, table)
+    # Interruttore /waitlist: acceso salvo un \`enabled: false\` esplicito; letto prima del claim come le preferenze.
+    waitlist = (state.get_state('waitlist_auto') or {}).get('enabled') is not False
     plans = []
     for date in dates:
         if (state.get_state('skip#' + date) or {}).get('skipped'):
@@ -112,6 +114,8 @@ def lambda_handler(event, context):
     results = []
     for date, times in plans:
         event = {'date': date, 'time': times[0]}
+        if waitlist:
+            event['waitlist'] = True
         if len(times) > 1:
             event['fallback_times'] = times[1:]
         try:

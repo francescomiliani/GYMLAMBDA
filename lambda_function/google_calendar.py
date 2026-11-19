@@ -10,6 +10,7 @@ else:
 
 TOKEN_URL = 'https://oauth2.googleapis.com/token'
 EVENTS = 'https://www.googleapis.com/calendar/v3/calendars/primary/events'
+COLOR_ID = '10'  # Basil: verde, per ogni evento di prenotazione
 REMINDERS = {'useDefault': False, 'overrides': [{'method': 'popup', 'minutes': 12 * 60},
                                                 {'method': 'popup', 'minutes': 60}]}
 
@@ -79,6 +80,7 @@ def _body(item, now):
         'start': {'dateTime': start.isoformat(), 'timeZone': 'Europe/Rome'},
         'end': {'dateTime': end.isoformat(), 'timeZone': 'Europe/Rome'},
         'reminders': REMINDERS,
+        'colorId': COLOR_ID,
     }
 
 
@@ -87,7 +89,7 @@ def _state_key(item):
     return 'gcal#' + str(key) if key else None
 
 
-def _saved_id(store, item):
+def _saved(store, item):
     key = _state_key(item)
     if not store or not key:
         return None
@@ -95,7 +97,7 @@ def _saved_id(store, item):
         saved = store.get_state(key)
     except Exception:
         return None
-    return saved.get('event_id') if isinstance(saved, dict) else None
+    return saved if isinstance(saved, dict) and saved.get('event_id') else None
 
 
 def _remember(store, item, event_id):
@@ -103,9 +105,17 @@ def _remember(store, item, event_id):
     if not store or not key or not event_id:
         return
     try:
-        store.put_state(key, {'event_id': event_id})
+        store.put_state(key, {'event_id': event_id, 'color': COLOR_ID})
     except Exception:
         pass
+
+
+def _recolor(event_id, creds, http):
+    token = _token(creds, http)
+    response = http.patch(EVENTS + '/' + event_id, json={'colorId': COLOR_ID},
+                          headers={'Authorization': 'Bearer ' + token}, timeout=15)
+    if response.status_code != 200:
+        raise CalendarError('recolor failed')
 
 
 def _import(item, creds, http, now):
@@ -123,15 +133,27 @@ def _import(item, creds, http, now):
 
 
 def publish(item, store=None, http=None, now=None, path=None):
-    """Write one class. channel is 'google', 'ics', or 'skipped'. Never raises."""
+    """Write one class. channel is 'google', 'ics', or 'skipped'. Never raises.
+
+    The ICS comes back on every outcome except 'skipped': the caller sends it always.
+    """
     import datetime
     now = now or datetime.datetime.now(calendar_ics.ROME)
     ics = calendar_ics.render([item], now)
     if calendar_ics.window(item) is None or not ics:
         return {'channel': 'skipped', 'ics': None}
-    saved = _saved_id(store, item)
+    saved = _saved(store, item)
     if saved:
-        return {'channel': 'google', 'event_id': saved, 'ics': None}
+        # Evento già scritto: lo si porta al verde una sola volta (lo stato ricorda il colore).
+        if saved.get('color') != COLOR_ID:
+            creds = load_credentials(path)
+            if creds:
+                try:
+                    _recolor(saved['event_id'], creds, http or _requests())
+                    _remember(store, item, saved['event_id'])
+                except Exception:
+                    pass
+        return {'channel': 'google', 'event_id': saved['event_id'], 'ics': ics}
     creds = load_credentials(path)
     if not creds:
         return {'channel': 'ics', 'ics': ics, 'reason': 'unconfigured'}
@@ -141,7 +163,7 @@ def publish(item, store=None, http=None, now=None, path=None):
     except Exception:
         return {'channel': 'ics', 'ics': ics, 'reason': 'failed'}
     _remember(store, item, event_id)
-    return {'channel': 'google', 'event_id': event_id, 'ics': None}
+    return {'channel': 'google', 'event_id': event_id, 'ics': ics}
 
 
 def sync(items, store=None, http=None, now=None, path=None):

@@ -168,7 +168,7 @@ class ScheduledGuardTests(unittest.TestCase):
         self.assertEqual(self.call(), {'message': 'confirmed'})
         self.assertEqual(self.call(scheduled_time='2026-03-29T01:30:00+01:00'),
                          {'status': 'duplicate', 'outcome': 'completed'})
-        self.booking.assert_called_once_with({'date': '2026-04-05', 'time': '18:15'}, None)
+        self.booking.assert_called_once_with({'date': '2026-04-05', 'time': '18:15', 'waitlist': True}, None)
         claims = [item for (_, pk), item in self.client.items.items() if pk.startswith('schedule#')]
         self.assertEqual(len(claims), 1)
         item = claims[0]
@@ -188,9 +188,19 @@ class ScheduledGuardTests(unittest.TestCase):
         # 2026-03-29 00:30 UTC = domenica 02:30 a Roma (ora legale): lezione domenica 2026-04-05
         self.set_state('prefs', {'SUN': [{'activity': 'gym', 'time': '07:00'}, {'activity': 'gym', 'time': '12:30'}]})
         self.call()
-        self.booking.assert_called_once_with({'date': '2026-04-05', 'time': '07:00', 'fallback_times': ['12:30']}, None)
+        self.booking.assert_called_once_with({'date': '2026-04-05', 'time': '07:00', 'waitlist': True, 'fallback_times': ['12:30']}, None)
         state = guard_store(self.client, 'table')
         self.assertEqual(state.get_state('last_run')['status'], 'completed')
+
+    def test_waitlist_switch_off_books_without_the_waitlist_flag(self):
+        self.set_state('waitlist_auto', {'enabled': False})
+        self.call()
+        self.booking.assert_called_once_with({'date': '2026-04-05', 'time': '18:15'}, None)
+
+    def test_waitlist_switch_on_or_missing_keeps_the_flag(self):
+        self.set_state('waitlist_auto', {'enabled': True})
+        self.call()
+        self.booking.assert_called_once_with({'date': '2026-04-05', 'time': '18:15', 'waitlist': True}, None)
 
     def test_weekday_without_preference_is_skipped_before_claim(self):
         self.set_state('prefs', {'MON': [{'activity': 'gym', 'time': '07:00'}]})
@@ -265,7 +275,7 @@ class ScheduledGuardTests(unittest.TestCase):
             self.clock.now.return_value = datetime.datetime.fromisoformat(stamp.replace('Z', '+00:00'))
             result = self.call(scheduled_time=stamp)
             if expected:
-                self.booking.assert_called_once_with({'date': expected, 'time': '07:00'}, None)
+                self.booking.assert_called_once_with({'date': expected, 'time': '07:00', 'waitlist': True}, None)
             else:
                 self.booking.assert_not_called()
                 self.assertEqual(result['status'], 'skipped')
@@ -276,7 +286,7 @@ class ScheduledGuardTests(unittest.TestCase):
                                 ('2026-10-25T01:30:00Z', '2026-11-01')]:
             self.clock.now.return_value = datetime.datetime.fromisoformat(stamp.replace('Z', '+00:00'))
             self.call(scheduled_time=stamp)
-            self.booking.assert_called_with({'date': expected, 'time': '18:15'}, None)
+            self.booking.assert_called_with({'date': expected, 'time': '18:15', 'waitlist': True}, None)
 
     def test_invalid_events_and_config_fail_closed(self):
         invalid = [None, {}, {**self.event, 'time': '18:15'}, {**self.event, 'action': 'book'},
