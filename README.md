@@ -575,8 +575,14 @@ I test unitari e di integrazione usano risposte simulate: nessuna chiamata di re
 nessuna prenotazione, nessuna email.
 Le indicazioni per gli agenti che lavorano sul repository sono in [AGENTS.md](AGENTS.md).
 
+Serve `requests` (in `lambda_function/requirements.txt`): usare il virtualenv del repository
+(`.venv`, ignorato da Git) o crearne uno. Con il Python di sistema senza `requests` i moduli
+di test non si importano e la suite gira solo in parte.
+
 ```bash
-python3 -m unittest discover -s tests -v
+python3 -m venv .venv  # solo la prima volta
+.venv/bin/python -m pip install -r lambda_function/requirements.txt
+.venv/bin/python -m unittest discover -s tests -v
 ```
 
 Coprono:

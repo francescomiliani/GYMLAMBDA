@@ -37,7 +37,9 @@ GymBooking è un client Python e una funzione AWS Lambda per il portale Sportric
 ## Test e verifica
 
 ```bash
-python3 -m unittest discover -s tests -v
+.venv/bin/python -m unittest discover -s tests -v
 ```
+
+Serve il virtualenv `.venv` con `requests`; con il Python di sistema molti moduli non si importano.
 
 I test unitari non inviano prenotazioni o notifiche. Per le letture reali e i comandi AWS usare il profilo e la regione documentati nel README; non stampare l'output contenente variabili d'ambiente o credenziali. Distinguere sempre conferme del portale, accettazione SNS/Telegram e consegna effettiva.
