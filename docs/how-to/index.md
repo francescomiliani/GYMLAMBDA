@@ -14,4 +14,4 @@ Procedure passo-passo.
 |---|---|
 | `docs/how-to/telegram-bot-locale.md` | Installare e gestire il bot locale senza AWS. |
 | `docs/how-to/terraform.md` | Gestire l'ambiente AWS con Terraform: bootstrap dello state, import delle risorse esistenti, migrazione dallo stack SAM, deploy. |
-| `docs/how-to/telegram-bot-deploy.md` | Costruire il pacchetto, creare i segreti SSM, distribuire lo stack, registrare webhook e comandi, verificare e fare rollback. |
+| `docs/how-to/telegram-bot-deploy.md` | Costruire il pacchetto, creare i segreti SSM, distribuire con Terraform, registrare webhook e comandi, verificare e fare rollback. |

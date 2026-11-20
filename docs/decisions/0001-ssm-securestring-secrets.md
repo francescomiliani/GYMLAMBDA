@@ -6,7 +6,7 @@ owner: gymbooking
 last-verified: 2026-11-18
 relevant-code:
   - lambda_function/ssm_config.py
-  - bot-template.yaml
+  - infra/terraform/lambda_bot.tf
 ---
 
 # Secrets in SSM SecureString read at runtime

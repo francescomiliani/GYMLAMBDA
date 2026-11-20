@@ -15,8 +15,8 @@ GymBooking è un client Python e una funzione AWS Lambda per il portale Sportric
 - `lambda_function/app.py`: handler Lambda, compatibilità con i payload precedenti e notifiche SNS/Telegram.
 - `lambda_function/sportrick.py`: client HTTP, catalogo, calendario, impegni e operazioni di prenotazione.
 - `lambda_function/requirements.txt`: dipendenze del pacchetto; `boto3` è disponibile nel runtime Lambda.
-- `tests/`: test unitari con mock; `template.yaml`: definizione SAM di base, non equivalente all'intera configurazione AWS attiva.
-- `infra/`: Terraform per l'ambiente AWS (stato: draft, import fatto il 2026-11-19, stack SAM ancora attivo; vedi `docs/how-to/terraform.md`). `plan` si può leggere liberamente; `apply`, `import` e `delete-stack` richiedono l'autorizzazione dell'utente. Non stampare né committare `terraform.tfvars` o gli state.
+- `tests/`: test unitari con mock.
+- `infra/`: Terraform per l'ambiente AWS (unico strumento IaC dal 2026-11-20, stack SAM dismesso; vedi `docs/how-to/terraform.md`). `plan` si può leggere liberamente; `apply`, `import` e `delete-stack` richiedono l'autorizzazione dell'utente. Non stampare né committare `terraform.tfvars` o gli state.
 
 ## Comportamento
 

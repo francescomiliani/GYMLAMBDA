@@ -5,7 +5,7 @@ status: canonical
 owner: gymbooking
 last-verified: 2026-11-19
 relevant-code:
-  - bot-template.yaml
+  - infra/terraform/lambda_bot.tf
 ---
 
 # AWS costs and free tier

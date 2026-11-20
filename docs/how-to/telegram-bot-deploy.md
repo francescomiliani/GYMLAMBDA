@@ -5,7 +5,7 @@ status: canonical
 owner: gymbooking
 last-verified: 2026-11-18
 relevant-code:
-  - bot-template.yaml
+  - infra/terraform/lambda_bot.tf
   - scripts/build_bot_package.py
 ---
 
@@ -40,24 +40,10 @@ entra mai: lo script fallisce se compare nell'output.
 
 ## 3. Build e deploy
 
-`sam build` richiede Python 3.12 nel `PATH` (`uv python find 3.12`).
-
-```sh
-sam build -t bot-template.yaml
-sam deploy -t .aws-sam/build/template.yaml --stack-name gymbot-telegram \
-  --region eu-north-1 --profile aws-personale --resolve-s3 \
-  --capabilities CAPABILITY_IAM --no-confirm-changeset --no-fail-on-empty-changeset \
-  --parameter-overrides "TelegramAllowedUserId=<id>" ScheduleName=gym-booking-mwf-0700 \
-  ScheduleRoleArn=arn:aws:iam::163876584948:role/GymBooking-personale-scheduler-role
-```
-
-Non impostare `ReservedConcurrentExecutions`: il limite dell'account lo rifiuta.
-
-In un aggiornamento conserva i parametri già presenti, incluso `GoogleCalendarParameterName`.
-Un valore vuoto (`SnsTopicArn`) si passa solo come `ParameterKey=SnsTopicArn,ParameterValue=`:
-la forma `SnsTopicArn=` viene rifiutata. Non stampare i valori. Lo stack è stato aggiornato
-il 2026-11-18 (`UPDATE_COMPLETE`). La schedule, dopo quel deploy, è stata accesa
-a parte: vedi la sezione sotto. Non la spegne un aggiornamento dello stack.
+Dal 2026-11-20 il deploy passa da Terraform (lo stack SAM e `bot-template.yaml` non esistono piu'): vedi
+`docs/how-to/terraform.md`. In sintesi, `infra/scripts/tf.sh plan`, lettura del piano e, solo con l'autorizzazione
+dell'utente, `apply`. Confrontare `CodeSize` delle Lambda prima e dopo. Non impostare
+`reserved_concurrent_executions`: il limite dell'account lo rifiuta.
 
 ## 4. Telegram
 
@@ -81,7 +67,7 @@ a parte: vedi la sezione sotto. Non la spegne un aggiornamento dello stack.
 ## Rollback
 
 1. Telegram `deleteWebhook`.
-2. `aws cloudformation delete-stack --stack-name gymbot-telegram --region eu-north-1 --profile aws-personale`
+2. `terraform -chdir=infra/terraform destroy` (solo con approvazione esplicita: cancella tabella e Lambda del bot)
 3. Facoltativo: eliminare i parametri `/gymbot/*` e il bucket S3 creato da SAM.
 
 La Lambda legacy non viene toccata. Dal 2026-11-12 la schedule punta al guard (vedi sotto).

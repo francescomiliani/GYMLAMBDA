@@ -8,7 +8,7 @@ variable "profile" {
   default = "aws-personale"
 }
 
-# --- Configurazione del bot (equivalenti dei Parameters di bot-template.yaml) ---
+# --- Configurazione del bot (ex Parameters del template SAM, dismesso il 2026-11-20) ---
 
 variable "telegram_allowed_user_id" {
   type        = string

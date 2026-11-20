@@ -1,9 +1,9 @@
 ---
 title: Manage the AWS environment with Terraform
 type: how-to
-status: draft
+status: canonical
 owner: gymbooking
-last-verified: 2026-11-19
+last-verified: 2026-11-20
 relevant-code:
   - infra/terraform/
   - infra/terraform/waitlist_watch.tf
@@ -15,12 +15,9 @@ relevant-code:
 
 # Manage the AWS environment with Terraform
 
-Stato: **draft**. Dal 2026-11-19 Terraform gestisce 31 risorse (passi 1-5 della migrazione fatti, `plan`
-senza modifiche). Il passo 4 e' fatto: dal 2026-11-19 le 15 risorse dello stack hanno `DeletionPolicy` e
-`UpdateReplacePolicy` `Retain` (change set dal template gia' distribuito, senza `sam deploy`, per non ricaricare il codice).
-Lo stack SAM `gymbot-telegram` e' ancora attivo: restano i passi 6 e 7, da fare dopo aver visto girare il
-guard versione 3 (primo giro utile: mezzanotte del 2026-11-20): finche' non e' dismesso, `docs/how-to/telegram-bot-deploy.md` descrive ancora il deploy del codice.
-Ogni comando che modifica AWS richiede l'autorizzazione esplicita dell'utente.
+Stato: **canonical**. Dal 2026-11-20 Terraform e' l'unico strumento IaC: lo stack SAM `gymbot-telegram` e' stato
+cancellato (le 15 risorse erano `Retain` e sono rimaste, ora solo in Terraform), i blocchi `import` e i template SAM
+sono stati rimossi. Ogni comando che modifica AWS richiede l'autorizzazione esplicita dell'utente.
 
 ## Lezioni dalla migrazione del 2026-11-19
 
@@ -44,7 +41,7 @@ email, schedule `gym-booking-mwf-0700` con il suo ruolo. **Non** gestisce i cinq
 
 ## Risorse nuove: controllo lista d'attesa
 
-`infra/terraform/waitlist_watch.tf` definisce risorse che non esistono nello stack SAM e quindi **non sono importate**: Lambda `gymbot-waitlist-watch`, ruolo e policy (DynamoDB Get/Put sulla tabella, SSM sui parametri del bot), ruolo dello scheduler che invoca solo questa funzione, log group e schedule `cron(0/30 6-22 * * ? *)` Europe/Rome con retry 0. `bot-template.yaml` non è stato esteso perché lo stack SAM sta per essere dismesso. Il primo `apply` le crea e carica il pacchetto corrente: costruirlo prima con `--with-deps` (`tf.sh` lo fa) e confrontare `CodeSize` delle Lambda prima e dopo, come nelle lezioni sopra. Stato iniziale della schedule: `waitlist_watch_enabled = true` (la funzione legge soltanto il portale); metterlo a `false` per crearla spenta. Un `plan` deve mostrare solo aggiunte.
+`infra/terraform/waitlist_watch.tf` definisce risorse che non esistono nello stack SAM e quindi **non sono importate**: Lambda `gymbot-waitlist-watch`, ruolo e policy (DynamoDB Get/Put sulla tabella, SSM sui parametri del bot), ruolo dello scheduler che invoca solo questa funzione, log group e schedule `cron(0/30 6-22 * * ? *)` Europe/Rome con retry 0. Il primo `apply` le crea e carica il pacchetto corrente: costruirlo prima con `--with-deps` (`tf.sh` lo fa) e confrontare `CodeSize` delle Lambda prima e dopo, come nelle lezioni sopra. Stato iniziale della schedule: `waitlist_watch_enabled = true` (la funzione legge soltanto il portale); metterlo a `false` per crearla spenta. Un `plan` deve mostrare solo aggiunte.
 
 ## Struttura
 
@@ -60,29 +57,19 @@ email, schedule `gym-booking-mwf-0700` con il suo ruolo. **Non** gestisce i cinq
 - Terraform >= 1.10, AWS CLI v2, login `aws login --profile aws-personale`.
 - `terraform.tfvars` (gitignorato) da `terraform.tfvars.example`: contiene ID Telegram, email e nomi fisici.
 
-## Migrazione dall'ambiente esistente
+## Migrazione dall'ambiente esistente (completata il 2026-11-20)
 
-1. Bootstrap: con il backend S3 commentato, `init` e `apply` con state locale; poi riattivare il backend e `init -migrate-state`.
-2. `infra/scripts/inventory.sh`, poi compilare `terraform.tfvars`. Verificare in particolare nomi delle
-   policy inline, permesso della Function URL (`lambda:InvokeFunctionUrl` e, se presente, `lambda:InvokeFunction`),
-   policy gestite dei ruoli e versione del guard puntata dalla schedule.
-3. `terraform -chdir=infra/terraform init` e `infra/scripts/tf.sh plan`. Il piano deve contenere solo import
-   e aggiunta dei tag; nessun replace, nessuna modifica a schedule, variabili d'ambiente o codice. Se
-   compaiono differenze, allineare il `.tf` all'AWS reale, non il contrario.
-4. Aggiungere `DeletionPolicy: Retain` e `UpdateReplacePolicy: Retain` alle risorse di `bot-template.yaml`,
-   fare `sam deploy --no-execute-changeset`, controllare il change set e solo dopo eseguirlo.
-5. `infra/scripts/tf.sh apply` (importa lo stato, non distribuisce codice).
-6. `aws cloudformation delete-stack --stack-name gymbot-telegram`. Verificare che funzioni, tabella, URL e log
-   group esistano ancora e che `getWebhookInfo` non segnali errori.
-7. `infra/scripts/tf.sh plan` deve dare zero modifiche. Rimuovere `imports.tf`, `bot-template.yaml`,
-   `template.yaml` e `tests/test_bot_template.py`; segnare `telegram-bot-deploy.md` come `superseded`.
-
-Rollback prima del passo 6: `terraform state rm` sulle risorse importate; lo stack SAM e' intatto.
+Storico, per ricreare un ambiente equivalente: bootstrap del bucket dello state (backend S3 commentato, `init` e
+`apply` locali, poi riattivare il backend e `init -migrate-state`); `infra/scripts/inventory.sh` per leggere gli ID
+fisici da mettere in `terraform.tfvars`; blocchi `import` e `plan` senza replace; `Retain` sulle risorse dello stack
+vecchio con un change set dal template gia' distribuito (non `sam deploy`, che ricarica il codice); `apply` degli
+import; `delete-stack`; `plan` a zero modifiche e rimozione degli import. Il 2026-11-20 le Lambda, la tabella (32
+elementi), la Function URL, i log group, i ruoli e la schedule erano tutti ancora presenti dopo `delete-stack`.
 
 ## Uso quotidiano
 
 - `infra/scripts/tf.sh plan` / `apply`.
-- **Deploy del codice**: durante la migrazione le Lambda hanno `ignore_changes = [filename, source_code_hash]`.
+- **Deploy del codice**: le Lambda hanno `ignore_changes = [filename, source_code_hash]`.
   Per distribuire, rimuoverlo in un commit dedicato e leggere il piano: il guard ha ora `publish = false` (e `publish` in `ignore_changes`) per non spostare il target della
   schedule attiva. Per distribuire il guard: `publish = true`, tolto da `ignore_changes`; ogni nuovo codice pubblica
   una versione e sposta il target della schedule; l'invoke config con retry 0 segue la versione. La Lambda legacy non si distribuisce da Terraform.

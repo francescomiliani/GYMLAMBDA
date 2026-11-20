@@ -5,7 +5,7 @@ status: canonical
 owner: gymbooking
 last-verified: 2026-11-19
 relevant-code:
-  - bot-template.yaml
+  - infra/terraform/lambda_bot.tf
   - lambda_function/telegram_bot.py
   - lambda_function/telegram_worker.py
   - lambda_function/bot_store.py
@@ -61,7 +61,7 @@ verificare prima di operare.
 | DynamoDB | Una tabella provisioned 1 RCU / 1 WCU, TTL su `purge_at`. Conferme, deduplica, stato dei job. |
 | SSM Parameter Store | Cinque `SecureString` Standard `/gymbot/*`, chiave AWS managed `alias/aws/ssm`, lette a runtime da `ssm_config.get_secret`. |
 | CloudWatch Logs | Un log group per funzione, retention 7 giorni. |
-| S3 | Bucket creato da SAM (`--resolve-s3`) solo per i pacchetti di deploy. |
+| S3 | Bucket dello state Terraform `gymbooking-tfstate-<account>`. Il bucket SAM dei vecchi pacchetti resta (non piu' usato). |
 | IAM | Ruoli dedicati. `ssm:GetParameter` sugli ARN esatti, DynamoDB limitato alla tabella. |
 
 Risorse preesistenti, non gestite dallo stack: Lambda `GymBooking-personale`

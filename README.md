@@ -29,11 +29,9 @@ Per Raspberry Pi o Linux, installazione, passaggio dal webhook e gestione: [guid
 
 ## Bot Telegram interattivo: sviluppo locale
 
-Il repository contiene un bot privato in sviluppo e il template separato
-`bot-template.yaml`. Distribuito il 12/11/2026 come stack `gymbot-telegram` (eu-north-1) e aggiornato il 18/11/2026 con la scrittura su Google Calendar. I segreti sono in
-SSM Parameter Store (`/gymbot/*`, SecureString). Pacchetto: `python3 scripts/build_bot_package.py`,
-poi `sam build/deploy` con Python 3.12. Rollback: `deleteWebhook` su Telegram e
-`aws cloudformation delete-stack --stack-name gymbot-telegram`. La concorrenza riservata del
+Il repository contiene un bot privato, gestito con Terraform (`infra/terraform`, vedi `docs/how-to/terraform.md`). Distribuito il 12/11/2026 come stack SAM `gymbot-telegram` (eu-north-1), importato in Terraform e dismesso lo stack il 20/11/2026. I segreti sono in
+SSM Parameter Store (`/gymbot/*`, SecureString). Pacchetto: `python3 scripts/build_bot_package.py --with-deps`,
+poi `infra/scripts/tf.sh plan` e, con l'approvazione dell'utente, `apply`. Rollback: `deleteWebhook` su Telegram e `terraform destroy` solo con approvazione esplicita (la tabella contiene lo stato del bot). La concorrenza riservata del
 webhook non è utilizzabile (limite account): modifiche schedule concorrenti non sono serializzate.
 La schedule `gym-booking-mwf-0700` è `ENABLED` dal 18/11/2026: lunedì a mezzanotte (ora di Roma) prenota la sala attrezzi delle 07:00 di lunedì, mercoledì e venerdì di quella settimana (stato AWS; il codice dal 19/11/2026 prenota invece ogni giorno la lezione a sette giorni; l'espressione su AWS è già `MON,TUE,...,SUN` e il target è la versione 4 del guard). Il trigger punta alla versione 1 del guard, con retry 0. `/enable` dal bot resta bloccato. Un deploy richiede un'approvazione esplicita e non tocca `GymBooking-personale`.
 
@@ -569,8 +567,7 @@ rm "$GYM_RESULT_FILE"
 
 Controllare sia `FunctionError` sia il contenuto della risposta: lo stato HTTP dell'API da
 solo non prova che la funzione sia riuscita. Sostituire la data dell'esempio con quella da
-verificare. `template.yaml` descrive solo la funzione di base e non configura SNS, Telegram
-o la schedule esistente: non usarlo come sostituto completo della configurazione attiva.
+verificare. La configurazione della funzione e della schedule sta in `infra/terraform`.
 
 ## Test
 

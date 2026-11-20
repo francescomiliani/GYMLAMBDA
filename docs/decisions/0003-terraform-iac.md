@@ -1,9 +1,9 @@
 ---
 title: Terraform as the single IaC tool
 type: decision
-status: draft
+status: canonical
 owner: gymbooking
-last-verified: 2026-11-19
+last-verified: 2026-11-20
 relevant-code:
   - infra/terraform/
   - tests/test_terraform.py
@@ -27,4 +27,4 @@ viene distribuito da Terraform finche' non si rimuove `ignore_changes` in un com
 
 - Un solo posto per risorse, IAM e schedule; `plan` mostra la deriva.
 - Lo state contiene le variabili d'ambiente della Lambda legacy (segreti in chiaro): bucket cifrato e privato.
-- Stato: `draft`. Import eseguito il 2026-11-19 (31 risorse); resta da dismettere lo stack SAM (vedi `docs/how-to/terraform.md`).
+- Migrazione completata il 2026-11-20: lo stack SAM e' stato cancellato (risorse `Retain`) e Terraform e' l'unico strumento.

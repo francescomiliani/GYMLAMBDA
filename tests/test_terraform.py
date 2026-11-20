@@ -135,13 +135,13 @@ class TerraformTests(unittest.TestCase):
         for pattern in ('.terraform/', '*.tfstate', '*.tfvars', '!*.tfvars.example'):
             self.assertIn(pattern, gitignore)
 
-    def test_every_import_has_a_resource(self):
-        imports = read('imports.tf')
-        resources = set(re.findall(r'(?m)^resource "(\w+)" "(\w+)"', ALL))
-        targets = re.findall(r'to = (\w+)\.(\w+)', imports)
-        self.assertGreaterEqual(len(targets), 30)
-        for kind, name in targets:
-            self.assertIn((kind, name), resources, f'{kind}.{name}')
+    def test_migration_leftovers_are_gone(self):
+        # migrazione da SAM completata il 2026-11-20: niente blocchi import ne' template SAM
+        self.assertFalse((TF_DIR / 'imports.tf').exists())
+        self.assertNotRegex(ALL, r'(?m)^import \{')
+        root = TF_DIR.parents[1]
+        for name in ('bot-template.yaml', 'template.yaml'):
+            self.assertFalse((root / name).exists(), name)
 
 
 if __name__ == '__main__':
